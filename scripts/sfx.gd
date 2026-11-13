@@ -43,6 +43,7 @@ func _build_all() -> void:
 	_streams["pickup"] = _pickup()
 	_streams["shout"] = _shout()
 	_streams["step"] = _step()
+	_streams["hide"] = _hide()
 
 func _to_wav(samples: PackedFloat32Array) -> AudioStreamWAV:
 	var wav := AudioStreamWAV.new()
@@ -172,4 +173,15 @@ func _step() -> AudioStreamWAV:
 		var t := float(i) / MIX_RATE
 		lp += 0.15 * (_noise() - lp)
 		s[i] = lp * exp(-60.0 * t) * 1.4
+	return _to_wav(s)
+
+func _hide() -> AudioStreamWAV:
+	var n := int(MIX_RATE * 0.25)
+	var s := PackedFloat32Array()
+	s.resize(n)
+	var lp := 0.0
+	for i in range(n):
+		var t := float(i) / MIX_RATE
+		lp += 0.12 * (_noise() - lp)
+		s[i] = lp * exp(-14.0 * t) * 1.2 + sin(TAU * 90.0 * t) * exp(-22.0 * t) * 0.5
 	return _to_wav(s)

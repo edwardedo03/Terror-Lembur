@@ -145,16 +145,21 @@ func _toggle_hide() -> void:
 		return
 	hiding = true
 	hide_spot = spot
-	global_position = spot
-	sprite.modulate.a = 0.45
+	global_position = spot + Vector2(0, 8)
+	sprite.modulate.a = 0.3
 	if name_label != null:
-		name_label.modulate.a = 0.45
+		name_label.modulate.a = 0.3
+	if lvl.has_method("play_sfx"):
+		lvl.play_sfx("hide", -6.0)
 
 func _unhide() -> void:
 	hiding = false
 	sprite.modulate.a = 1.0
 	if name_label != null:
 		name_label.modulate.a = 1.0
+	var lvl := get_parent().get_parent()
+	if lvl != null and lvl.has_method("play_sfx"):
+		lvl.play_sfx("hide", -8.0, 1.3)
 
 func _throw() -> void:
 	has_throwable = false

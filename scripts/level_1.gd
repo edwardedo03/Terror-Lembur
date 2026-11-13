@@ -893,6 +893,10 @@ func _update_hud() -> void:
 				elif tp.task_id == 3:
 					need_txt = " (butuh 2 orang, atau 1 orang 10 detik kalau teman dikurung)"
 				prompt_txt = "Tahan E: " + tp.label_text + need_txt
+			elif me.get("hiding"):
+				prompt_txt = "NGUMPET — gerak atau tekan C buat keluar"
+			elif nearest_desk(me.global_position) != Vector2.INF:
+				prompt_txt = "C: ngumpet di bawah meja"
 			elif me.get("has_throwable"):
 				prompt_txt = "Q: lempar barang  |  F: teriak  |  R: senter  |  C: ngumpet  |  SHIFT: lari"
 			else:
@@ -1114,6 +1118,7 @@ func _build_props() -> void:
 	_place_prop(lap, Vector2(1105, 352), false, Vector2.ZERO)
 	_place_prop(mug, Vector2(1130, 356), false, Vector2.ZERO)
 	_place_prop(conf, Vector2(640, 430), true, Vector2(96, 40))
+	desk_positions.append(Vector2(640, 430))
 	_place_prop(chair_f, Vector2(590, 350), true, Vector2(26, 20))
 	_place_prop(chair_f, Vector2(640, 350), true, Vector2(26, 20))
 	_place_prop(chair_f, Vector2(690, 350), true, Vector2(26, 20))
