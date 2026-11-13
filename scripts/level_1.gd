@@ -99,7 +99,7 @@ func _ready() -> void:
 	add_child(wall_layer)
 	for y in range(ROOM_H):
 		for x in range(ROOM_W):
-			floor_layer.set_cell(Vector2i(x, y), 0, Vector2i(1, 0))
+			floor_layer.set_cell(Vector2i(x, y), 0, _floor_tile_for(x, y))
 	for x in range(ROOM_W):
 		_set_wall(wall_layer, x, 0, Vector2i(1, 0) if x == 0 else (Vector2i(5, 0) if x == ROOM_W - 1 else Vector2i(2, 0)))
 		_set_wall(wall_layer, x, 1, Vector2i(6, 0) if x == 0 else (Vector2i(2, 1) if x == ROOM_W - 1 else Vector2i(7, 0)))
@@ -134,6 +134,16 @@ func _ready() -> void:
 
 func _set_wall(layer: TileMapLayer, x: int, y: int, atlas: Vector2i) -> void:
 	layer.set_cell(Vector2i(x, y), 1, atlas)
+
+func _floor_tile_for(tx: int, ty: int) -> Vector2i:
+	var c := Vector2(tx * 32 + 16, ty * 32 + 16)
+	if BOSS_ROOM.has_point(c):
+		return Vector2i(0, 0)
+	if PANTRY_ROOM.has_point(c) or TOILET_ROOM.has_point(c) or SERVER_ROOM.has_point(c):
+		return Vector2i(2, 0)
+	if ty == 8 or tx == 14:
+		return Vector2i(2, 0)
+	return Vector2i(1, 0)
 
 func _build_partitions(layer: TileMapLayer) -> void:
 	var h := Vector2i(7, 0)
@@ -217,6 +227,28 @@ func _paper(pos: Vector2, rot: float) -> void:
 	p.rotation = rot
 	add_child(p)
 
+func _rug(center: Vector2, size: Vector2, color: Color) -> void:
+	var border := Polygon2D.new()
+	border.color = Color(0.1, 0.07, 0.07, 0.9)
+	border.z_index = -1
+	border.polygon = PackedVector2Array([Vector2(-size.x / 2 - 6, -size.y / 2 - 6), Vector2(size.x / 2 + 6, -size.y / 2 - 6), Vector2(size.x / 2 + 6, size.y / 2 + 6), Vector2(-size.x / 2 - 6, size.y / 2 + 6)])
+	border.position = center
+	add_child(border)
+	var fill := Polygon2D.new()
+	fill.color = color
+	fill.z_index = -1
+	fill.polygon = PackedVector2Array([Vector2(-size.x / 2, -size.y / 2), Vector2(size.x / 2, -size.y / 2), Vector2(size.x / 2, size.y / 2), Vector2(-size.x / 2, size.y / 2)])
+	fill.position = center
+	add_child(fill)
+
+func _cable(points: PackedVector2Array) -> void:
+	var l := Line2D.new()
+	l.points = points
+	l.width = 2.0
+	l.default_color = Color(0.05, 0.05, 0.06, 0.9)
+	l.z_index = -1
+	add_child(l)
+
 func _build_horror() -> void:
 	_blood_spot(Vector2(300, 300), 26.0)
 	_blood_spot(Vector2(340, 320), 14.0)
@@ -225,6 +257,10 @@ func _build_horror() -> void:
 	_blood_spot(Vector2(1120, 500), 22.0)
 	_blood_spot(Vector2(200, 620), 18.0)
 	_blood_spot(Vector2(640, 180), 16.0)
+	_blood_spot(Vector2(500, 200), 15.0)
+	_blood_spot(Vector2(900, 600), 20.0)
+	_blood_spot(Vector2(1100, 250), 13.0)
+	_blood_spot(Vector2(480, 640), 17.0)
 	_paper(Vector2(420, 280), 0.4)
 	_paper(Vector2(460, 300), -0.7)
 	_paper(Vector2(560, 480), 1.1)
@@ -233,6 +269,18 @@ func _build_horror() -> void:
 	_paper(Vector2(300, 560), 0.9)
 	_paper(Vector2(1080, 300), -0.4)
 	_paper(Vector2(640, 620), 0.6)
+	_paper(Vector2(350, 450), 1.4)
+	_paper(Vector2(800, 200), -0.5)
+	_paper(Vector2(1150, 550), 0.8)
+	_paper(Vector2(200, 400), -1.0)
+	_paper(Vector2(700, 260), 0.3)
+	_rug(Vector2(1140, 185), Vector2(150, 60), Color(0.35, 0.08, 0.1, 0.85))
+	_rug(Vector2(640, 430), Vector2(260, 150), Color(0.15, 0.18, 0.28, 0.85))
+	_rug(Vector2(1120, 610), Vector2(130, 70), Color(0.4, 0.28, 0.15, 0.85))
+	_cable(PackedVector2Array([Vector2(155, 160), Vector2(150, 120), Vector2(150, 80)]))
+	_cable(PackedVector2Array([Vector2(995, 160), Vector2(995, 120), Vector2(995, 80)]))
+	_cable(PackedVector2Array([Vector2(640, 110), Vector2(640, 80)]))
+	_cable(PackedVector2Array([Vector2(615, 400), Vector2(600, 430), Vector2(600, 460)]))
 	for pos in [Vector2(400, 260), Vector2(880, 420), Vector2(640, 620)]:
 		var fl := PointLight2D.new()
 		fl.position = pos
@@ -1085,6 +1133,28 @@ func _build_props() -> void:
 	_place_prop(trash, Vector2(320, 232), true, Vector2(16, 12))
 	_place_prop(trash, Vector2(960, 232), true, Vector2(16, 12))
 	_place_prop(trash, Vector2(760, 520), true, Vector2(16, 12))
+	_place_prop(desk, Vector2(1090, 90), true, Vector2(64, 24))
+	_place_prop(chair_b, Vector2(1090, 120), true, Vector2(26, 20))
+	_place_prop(lap, Vector2(1085, 72), false, Vector2.ZERO)
+	_place_prop(plant, Vector2(1240, 200), true, Vector2(26, 16))
+	_place_prop(cab, Vector2(500, 88), true, Vector2(28, 24))
+	_place_prop(paper, Vector2(480, 150), false, Vector2.ZERO)
+	_place_prop(paper, Vector2(490, 170), false, Vector2.ZERO)
+	_place_prop(cab, Vector2(720, 88), true, Vector2(28, 24))
+	_place_prop(cab, Vector2(750, 88), true, Vector2(28, 24))
+	_place_prop(desk, Vector2(1060, 600), true, Vector2(64, 24))
+	_place_prop(chair_f, Vector2(1060, 570), true, Vector2(26, 20))
+	_place_prop(chair_b, Vector2(1060, 630), true, Vector2(26, 20))
+	_place_prop(plant, Vector2(1010, 540), true, Vector2(26, 16))
+	_place_prop(plant, Vector2(60, 580), true, Vector2(26, 16))
+	_place_prop(trash, Vector2(220, 660), true, Vector2(16, 12))
+	_place_prop(desk, Vector2(880, 140), true, Vector2(64, 24))
+	_place_prop(chair_b, Vector2(880, 170), true, Vector2(26, 20))
+	_place_prop(pc, Vector2(865, 122), false, Vector2.ZERO)
+	_place_prop(plant, Vector2(60, 220), true, Vector2(26, 16))
+	_place_prop(paper, Vector2(250, 220), false, Vector2.ZERO)
+	_place_prop(cab, Vector2(500, 300), true, Vector2(28, 24))
+	_place_prop(plant, Vector2(810, 300), true, Vector2(26, 16))
 
 func _place_prop(rel: String, pos: Vector2, solid: bool, col_size: Vector2) -> void:
 	var tex := load(PROP_BASE + rel) as Texture2D
