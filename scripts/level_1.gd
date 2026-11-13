@@ -1051,6 +1051,7 @@ func spawn_throwable(pos: Vector2, dir: Vector2) -> void:
 	th.launch(pos + dir * 24.0, dir)
 
 const PROP_BASE := "res://assets/office_assets/main/Office_Pixel_Art_Free_v1.0/Props/"
+const MODERN_BASE := "res://assets/office_assets/modern/objects/"
 
 func _build_props() -> void:
 	var desk := "Desks/office_desk/office_desk_front.png"
@@ -1155,6 +1156,9 @@ func _build_props() -> void:
 	_place_prop(paper, Vector2(250, 220), false, Vector2.ZERO)
 	_place_prop(cab, Vector2(500, 300), true, Vector2(28, 24))
 	_place_prop(plant, Vector2(810, 300), true, Vector2(26, 16))
+	_place_modern("bookshelf.png", Vector2(1150, 80), true, Vector2(30, 20))
+	_place_modern("sofa.png", Vector2(1200, 560), true, Vector2(44, 20))
+	_place_modern("whiteboard.png", Vector2(700, 300), false, Vector2.ZERO)
 
 func _place_prop(rel: String, pos: Vector2, solid: bool, col_size: Vector2) -> void:
 	var tex := load(PROP_BASE + rel) as Texture2D
@@ -1180,3 +1184,26 @@ func _place_prop(rel: String, pos: Vector2, solid: bool, col_size: Vector2) -> v
 		root.add_child(body)
 	if rel.begins_with("Desks/"):
 		desk_positions.append(pos)
+
+func _place_modern(rel: String, pos: Vector2, solid: bool, col_size: Vector2) -> void:
+	var tex := load(MODERN_BASE + rel) as Texture2D
+	if tex == null:
+		return
+	var root := Node2D.new()
+	root.position = pos
+	ysort.add_child(root)
+	var spr := Sprite2D.new()
+	spr.texture = tex
+	spr.position = Vector2(0, -tex.get_height() / 2.0 + 16)
+	root.add_child(spr)
+	if solid:
+		var body := StaticBody2D.new()
+		body.collision_layer = 1
+		body.collision_mask = 0
+		var shape := CollisionShape2D.new()
+		var rect := RectangleShape2D.new()
+		rect.size = col_size
+		shape.shape = rect
+		shape.position = Vector2(0, 8)
+		body.add_child(shape)
+		root.add_child(body)

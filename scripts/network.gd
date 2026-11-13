@@ -306,7 +306,7 @@ func _build_menu() -> void:
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	pvb.add_child(status_label)
-	var foot := UITheme.make_label("Office Pixel Art by Imersa Studios  •  Pemrograman Gim, Universitas Katolik Indonesia Atma Jaya", UITheme.body_font(), 12, Color(0.45, 0.45, 0.45))
+	var foot := UITheme.make_label("Office Pixel Art by Imersa Studios  •  Modern Office Tileset by Rubber Studio  •  Pemrograman Gim, Universitas Katolik Indonesia Atma Jaya", UITheme.body_font(), 12, Color(0.45, 0.45, 0.45))
 	foot.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vb.add_child(foot)
 	_start_listening()
