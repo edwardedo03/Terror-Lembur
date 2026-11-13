@@ -33,6 +33,9 @@ var smoke_poly: Polygon2D
 var eye_l: Polygon2D
 var eye_r: Polygon2D
 var state_mark: Label
+var boss_light: PointLight2D
+
+const CONE_TEX := preload("res://assets/flashlight_cone.png")
 var _last_mark := ""
 
 func _enter_tree() -> void:
@@ -79,6 +82,17 @@ func _build_visual() -> void:
 	state_mark.add_theme_color_override("font_outline_color", Color(0, 0, 0, 1))
 	state_mark.add_theme_constant_override("outline_size", 8)
 	add_child(state_mark)
+	boss_light = PointLight2D.new()
+	boss_light.texture = CONE_TEX
+	boss_light.texture_scale = 2.0
+	boss_light.energy = 2.0
+	boss_light.color = Color(1.0, 0.15, 0.15, 1.0)
+	add_child(boss_light)
+
+func _process(_delta: float) -> void:
+	if boss_light != null:
+		boss_light.position = facing * 12.0
+		boss_light.rotation = facing.angle()
 
 func _circle_points(center: Vector2, r: float) -> PackedVector2Array:
 	var pts := PackedVector2Array()
