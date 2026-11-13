@@ -3,6 +3,9 @@ extends CharacterBody2D
 const SPEED := 200.0
 const ACCEL := 1400.0
 const FRICTION := 1600.0
+const SPRINT_MULT := 1.5
+const STAMINA_DRAIN := 30.0
+const STAMINA_REGEN := 22.0
 const SHOUT_COOLDOWN := 5.0
 const SHOUT_RADIUS := 500.0
 
@@ -17,6 +20,9 @@ var flashlight_on := true
 var has_throwable := false
 var shout_timer := 0.0
 var hide_spot := Vector2.ZERO
+var stamina := 100.0
+var sprinting := false
+var step_timer := 0.0
 
 @onready var sprite: AnimatedSprite2D = $AnimatedSprite2D
 @onready var camera: Camera2D = $Camera2D
@@ -59,8 +65,14 @@ func _physics_process(delta: float) -> void:
 		input_dir = Input.get_vector("left", "right", "up", "down")
 	if locked or hiding or interacting:
 		input_dir = Vector2.ZERO
+	sprinting = not bot_mode and Input.is_action_pressed("sprint") and input_dir.length() > 0.1 and stamina > 0.0
+	var speed := SPEED * SPRINT_MULT if sprinting else SPEED
+	if sprinting:
+		stamina = maxf(0.0, stamina - STAMINA_DRAIN * delta)
+	else:
+		stamina = minf(100.0, stamina + STAMINA_REGEN * delta)
 	if input_dir.length() > 0.1:
-		velocity = velocity.move_toward(input_dir.normalized() * SPEED, ACCEL * delta)
+		velocity = velocity.move_toward(input_dir.normalized() * speed, ACCEL * delta)
 	else:
 		velocity = velocity.move_toward(Vector2.ZERO, FRICTION * delta)
 	move_and_slide()
@@ -76,6 +88,8 @@ func _update_actions(input_dir: Vector2) -> void:
 		shout_timer = SHOUT_COOLDOWN
 		var lvl := get_parent().get_parent()
 		if lvl != null:
+			if lvl.has_method("play_sfx"):
+				lvl.play_sfx("shout", -6.0)
 			lvl.rpc_id(1, "report_noise", global_position, SHOUT_RADIUS)
 	if Input.is_action_just_pressed("hide"):
 		_toggle_hide()
@@ -135,6 +149,13 @@ func _process(_delta: float) -> void:
 		else:
 			facing = Vector2.DOWN if velocity.y > 0.0 else Vector2.UP
 		sprite.play("walk_" + _dir_name(facing))
+		if is_multiplayer_authority() and not bot_mode:
+			step_timer -= _delta
+			if step_timer <= 0.0:
+				step_timer = 0.24 if sprinting else 0.34
+				var lvl2 := get_parent().get_parent()
+				if lvl2 != null and lvl2.has_method("play_sfx"):
+					lvl2.play_sfx("step", -16.0, randf_range(0.92, 1.08))
 	else:
 		sprite.play("idle_" + _dir_name(facing))
 	light.position = facing * 24.0
@@ -160,3 +181,6 @@ func set_locked(value: bool) -> void:
 @rpc("any_peer", "call_local")
 func give_throwable() -> void:
 	has_throwable = true
+	var lvl := get_parent().get_parent()
+	if lvl != null and lvl.has_method("play_sfx"):
+		lvl.play_sfx("pickup", -6.0)

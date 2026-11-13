@@ -64,6 +64,13 @@ var hud_status_label: Label
 var hud_status_pill: PanelContainer
 var hud_edge_rects: Array[ColorRect] = []
 var hud_pulse_t := 0.0
+var flash_rect: ColorRect
+var flash_a := 0.0
+var hud_stamina_bar: ProgressBar
+var sfx: SFX
+var heartbeat_timer := 0.0
+var tick_timer := 0.0
+var task_done_sounded: Dictionary = {}
 var end_dim: ColorRect
 var end_center: CenterContainer
 var elapsed := 0.0
@@ -76,6 +83,8 @@ var end_detail: Label
 var end_stars: Array[Label] = []
 
 func _ready() -> void:
+	sfx = SFX.new()
+	add_child(sfx)
 	var tile_set := load(TILESET_PATH) as TileSet
 	var floor_layer := TileMapLayer.new()
 	floor_layer.name = "FloorLayer"
@@ -324,6 +333,13 @@ func show_hud() -> void:
 	if hud_layer != null:
 		hud_layer.visible = true
 
+func play_sfx(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0) -> void:
+	if sfx != null:
+		sfx.play(sound_name, volume_db, pitch)
+
+func flash_red(amount: float = 0.35) -> void:
+	flash_a = maxf(flash_a, amount)
+
 func _build_hud() -> void:
 	var hud := CanvasLayer.new()
 	hud.name = "HUD"
@@ -419,15 +435,30 @@ func _build_hud() -> void:
 	hud_status_pill.add_child(hud_status_label)
 	var prompt_center := CenterContainer.new()
 	prompt_center.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	prompt_center.offset_top = -76
+	prompt_center.offset_top = -96
 	prompt_center.offset_bottom = -8
 	prompt_center.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud.add_child(prompt_center)
+	var prompt_outer_vb := VBoxContainer.new()
+	prompt_outer_vb.add_theme_constant_override("separation", 6)
+	prompt_center.add_child(prompt_outer_vb)
+	var stamina_row := HBoxContainer.new()
+	stamina_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	prompt_outer_vb.add_child(stamina_row)
+	hud_stamina_bar = ProgressBar.new()
+	hud_stamina_bar.min_value = 0.0
+	hud_stamina_bar.max_value = 100.0
+	hud_stamina_bar.value = 100.0
+	hud_stamina_bar.custom_minimum_size = Vector2(220, 8)
+	hud_stamina_bar.show_percentage = false
+	hud_stamina_bar.add_theme_stylebox_override("background", UITheme.bar_bg_style())
+	hud_stamina_bar.add_theme_stylebox_override("fill", UITheme.bar_fill_style(Color(0.35, 0.85, 0.6)))
+	stamina_row.add_child(hud_stamina_bar)
 	hud_prompt_pill = PanelContainer.new()
 	UITheme.apply_panel(hud_prompt_pill, Color(0.05, 0.05, 0.06, 0.88), UITheme.COL_GOLD, 1, 16)
 	hud_prompt_pill.custom_minimum_size = Vector2(640, 0)
 	hud_prompt_pill.visible = false
-	prompt_center.add_child(hud_prompt_pill)
+	prompt_outer_vb.add_child(hud_prompt_pill)
 	var prompt_vb := VBoxContainer.new()
 	prompt_vb.add_theme_constant_override("separation", 4)
 	hud_prompt_pill.add_child(prompt_vb)
@@ -462,6 +493,11 @@ func _build_hud() -> void:
 			edge.offset_left = -22
 		hud.add_child(edge)
 		hud_edge_rects.append(edge)
+	flash_rect = ColorRect.new()
+	flash_rect.color = Color(0.9, 0.05, 0.05, 0.0)
+	flash_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	flash_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.add_child(flash_rect)
 	end_dim = ColorRect.new()
 	end_dim.color = Color(0, 0, 0, 0.65)
 	end_dim.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -510,6 +546,22 @@ func _process(delta: float) -> void:
 		if warn_timer <= 0.0:
 			hud_warn_label.text = ""
 	hud_pulse_t += delta
+	if flash_a > 0.0:
+		flash_a = maxf(0.0, flash_a - delta * 1.4)
+		flash_rect.color = Color(0.9, 0.05, 0.05, flash_a)
+	if boss != null and not game_over:
+		var bd := _boss_distance()
+		if bd >= 0.0 and bd < 320.0:
+			heartbeat_timer -= delta
+			if heartbeat_timer <= 0.0:
+				heartbeat_timer = lerpf(0.45, 1.0, clampf(bd / 320.0, 0.0, 1.0))
+				play_sfx("heartbeat", -8.0)
+	var me2 := _my_player()
+	if me2 != null and me2.get("interacting") and not game_over:
+		tick_timer -= delta
+		if tick_timer <= 0.0:
+			tick_timer = 0.4
+			play_sfx("tick", -10.0)
 	hud_warn_label.visible = hud_warn_label.text != ""
 	if hud_warn_label.visible:
 		hud_warn_label.modulate.a = 0.75 + 0.25 * sin(hud_pulse_t * 8.0)
@@ -739,6 +791,13 @@ func _update_hud() -> void:
 		bi += 1
 	if hud_task_count != null:
 		hud_task_count.text = str(done_count) + "/3"
+	for tp2 in tasks:
+		if tp2.done and not task_done_sounded.get(tp2.task_id, false):
+			task_done_sounded[tp2.task_id] = true
+			play_sfx("complete", -4.0)
+	var me_st := _my_player()
+	if me_st != null:
+		hud_stamina_bar.value = float(me_st.get("stamina"))
 	var mins := int(elapsed) / 60
 	var secs := int(elapsed) % 60
 	hud_timer_label.text = "%d:%02d" % [mins, secs]
@@ -787,9 +846,9 @@ func _update_hud() -> void:
 					need_txt = " (butuh 2 orang, atau 1 orang 10 detik kalau teman dikurung)"
 				prompt_txt = "Tahan E: " + tp.label_text + need_txt
 			elif me.get("has_throwable"):
-				prompt_txt = "Q: lempar barang  |  F: teriak  |  R: senter  |  C: ngumpet di bawah meja"
+				prompt_txt = "Q: lempar barang  |  F: teriak  |  R: senter  |  C: ngumpet  |  SHIFT: lari"
 			else:
-				prompt_txt = "E: interaksi  |  F: teriak  |  R: senter  |  C: ngumpet di bawah meja"
+				prompt_txt = "E: interaksi  |  F: teriak  |  R: senter  |  C: ngumpet  |  SHIFT: lari"
 	hud_prompt_label.text = prompt_txt
 	hud_prompt_pill.visible = prompt_txt != ""
 	if prompt_prog >= 0.0:
@@ -902,25 +961,37 @@ func consume_noise() -> Vector2:
 func on_player_caught(player: Node2D) -> void:
 	ever_caught = true
 	times_caught += 1
-	add_shake(10.0)
 	player.global_position = CELL_POS
 	player.rpc_id(int(player.name), "set_locked", true)
+	rpc("_fx_caught")
+
+@rpc("any_peer", "call_local")
+func _fx_caught() -> void:
+	add_shake(10.0)
+	flash_red(0.4)
 	hud_warn_label.text = "TEMANMU DITANGKAP!"
 	warn_timer = 3.0
+	play_sfx("sting", -2.0)
 
+@rpc("any_peer", "call_local")
 func on_boss_chase() -> void:
 	add_shake(3.0)
 	hud_warn_label.text = "BOS MENGEJAR!"
 	warn_timer = 2.0
+	play_sfx("alarm", -6.0)
 
+@rpc("any_peer", "call_local")
 func on_boss_telegraph() -> void:
 	hud_warn_label.text = "Bisikan... bos mau pindah!"
 	warn_timer = 1.2
+	play_sfx("whisper", -4.0)
 
+@rpc("any_peer", "call_local")
 func on_boss_teleported(dest: Vector2) -> void:
 	add_shake(6.0)
 	hud_warn_label.text = "Bos muncul di dekatmu!"
 	warn_timer = 2.0
+	play_sfx("thud", -4.0)
 
 @rpc("any_peer", "call_local")
 func spawn_throwable(pos: Vector2, dir: Vector2) -> void:

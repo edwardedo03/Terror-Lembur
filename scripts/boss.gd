@@ -32,6 +32,8 @@ var body_poly: Polygon2D
 var smoke_poly: Polygon2D
 var eye_l: Polygon2D
 var eye_r: Polygon2D
+var state_mark: Label
+var _last_mark := ""
 
 func _enter_tree() -> void:
 	set_multiplayer_authority(1)
@@ -69,6 +71,14 @@ func _build_visual() -> void:
 	eye_r.color = Color(1, 1, 1, 1)
 	eye_r.polygon = _circle_points(Vector2(6, -20), 3.0)
 	add_child(eye_r)
+	state_mark = Label.new()
+	state_mark.text = ""
+	state_mark.position = Vector2(-14, -74)
+	state_mark.add_theme_font_size_override("font_size", 30)
+	state_mark.add_theme_color_override("font_color", Color(1, 0.9, 0.3, 1))
+	state_mark.add_theme_color_override("font_outline_color", Color(0, 0, 0, 1))
+	state_mark.add_theme_constant_override("outline_size", 8)
+	add_child(state_mark)
 
 func _circle_points(center: Vector2, r: float) -> PackedVector2Array:
 	var pts := PackedVector2Array()
@@ -107,8 +117,24 @@ func _physics_process(delta: float) -> void:
 		State.RETURN:
 			_update_return(delta)
 	_update_detection()
+	_refresh_mark()
 	move_and_slide()
 	_check_catch()
+
+func _refresh_mark() -> void:
+	var m := ""
+	match state:
+		State.SUSPICIOUS, State.SEARCH:
+			m = "?"
+		State.CHASE:
+			m = "!"
+	if m != _last_mark:
+		_last_mark = m
+		rpc("_set_mark", m)
+
+@rpc("any_peer", "call_local")
+func _set_mark(t: String) -> void:
+	state_mark.text = t
 
 func _pick_waypoint() -> void:
 	for i in range(8):
@@ -203,7 +229,7 @@ func _update_detection() -> void:
 			state = State.CHASE
 			chase_timer = 0.0
 			state_timer = 0.0
-			level.on_boss_chase()
+			level.rpc("on_boss_chase")
 		target = p.global_position
 		return
 	var noise: Vector2 = level.consume_noise()
@@ -238,10 +264,20 @@ func _nearest_visible_player() -> Node2D:
 			continue
 		if not child.get("flashlight_on") and not level.is_lit(child.global_position):
 			continue
+		if not _has_line_of_sight(child):
+			continue
 		if d < best_d:
 			best = child
 			best_d = d
 	return best
+
+func _has_line_of_sight(p: Node2D) -> bool:
+	var space := get_world_2d().direct_space_state
+	var query := PhysicsRayQueryParameters2D.create(global_position, p.global_position, 1, [self])
+	var hit: Dictionary = space.intersect_ray(query)
+	if hit.is_empty():
+		return true
+	return hit.get("collider") == p
 
 func _check_catch() -> void:
 	if blind_timer > 0.0:
@@ -261,7 +297,7 @@ func _check_catch() -> void:
 
 func _start_telegraph() -> void:
 	telegraph_timer = 1.0
-	level.on_boss_telegraph()
+	level.rpc("on_boss_telegraph")
 
 func _do_teleport() -> void:
 	var dest: Vector2 = level.teleport_destination()
@@ -271,4 +307,4 @@ func _do_teleport() -> void:
 	state = State.PATROL
 	state_timer = 0.0
 	_pick_waypoint()
-	level.on_boss_teleported(dest)
+	level.rpc("on_boss_teleported", dest)
