@@ -18,6 +18,13 @@ const TASK_DEFS := [
 const CELL_POS := Vector2(1180, 140)
 const BOSS_ROOM := Rect2(1050, 64, 198, 156)
 const MEETING_ROOM := Rect2(480, 288, 352, 320)
+const IT_ROOM := Rect2(32, 64, 256, 192)
+const ARCHIVE_ROOM := Rect2(320, 64, 192, 128)
+const SERVER_ROOM := Rect2(544, 64, 224, 128)
+const HRD_ROOM := Rect2(800, 64, 224, 128)
+const PANTRY_ROOM := Rect2(992, 512, 256, 192)
+const TOILET_ROOM := Rect2(32, 544, 224, 160)
+const ALL_ROOMS := [BOSS_ROOM, MEETING_ROOM, IT_ROOM, ARCHIVE_ROOM, SERVER_ROOM, HRD_ROOM, PANTRY_ROOM, TOILET_ROOM]
 const INTERACT_RANGE := 80.0
 
 var ysort: Node2D
@@ -36,6 +43,10 @@ var boss_speed_mult := 1.0
 var warn_timer := 0.0
 var noise_emit_timer := 0.0
 var debug_timer := 0.0
+
+var flicker_lights: Array[PointLight2D] = []
+var flicker_base: Array[float] = []
+var flicker_timer := 0.0
 
 var hud_task_label: Label
 var hud_prompt_label: Label
@@ -73,6 +84,7 @@ func _ready() -> void:
 	spawner = $"Spawner"
 	_build_props()
 	_build_darkness()
+	_build_horror()
 	_build_cell()
 	_build_tasks()
 	_build_pickups()
@@ -108,11 +120,111 @@ func _build_partitions(layer: TileMapLayer) -> void:
 	for y in range(9, 19):
 		_set_wall(layer, 15, y, v)
 		_set_wall(layer, 25, y, v2)
+	for y in range(2, 8):
+		_set_wall(layer, 9, y, v2)
+	for x in range(1, 4):
+		_set_wall(layer, x, 8, h)
+	for x in range(6, 9):
+		_set_wall(layer, x, 8, h)
+	for y in range(2, 6):
+		_set_wall(layer, 16, y, v2)
+	for x in range(10, 12):
+		_set_wall(layer, x, 6, h)
+	for x in range(14, 16):
+		_set_wall(layer, x, 6, h)
+	for y in range(2, 6):
+		_set_wall(layer, 24, y, v2)
+	for x in range(17, 20):
+		_set_wall(layer, x, 6, h)
+	for x in range(22, 24):
+		_set_wall(layer, x, 6, h)
+	for y in range(2, 6):
+		_set_wall(layer, 25, y, v)
+	for x in range(25, 27):
+		_set_wall(layer, x, 6, h)
+	for x in range(29, 32):
+		_set_wall(layer, x, 6, h)
+	for y in range(15, 22):
+		_set_wall(layer, 30, y, v)
+	for x in range(30, 33):
+		_set_wall(layer, x, 15, h)
+	for x in range(35, 39):
+		_set_wall(layer, x, 15, h)
+	for y in range(16, 22):
+		_set_wall(layer, 8, y, v2)
+	for x in range(1, 4):
+		_set_wall(layer, x, 16, h)
+	for x in range(6, 8):
+		_set_wall(layer, x, 16, h)
 
 func _build_darkness() -> void:
 	var mod := CanvasModulate.new()
 	mod.color = Color(0.22, 0.22, 0.28)
 	add_child(mod)
+
+func _blood_spot(pos: Vector2, s: float) -> void:
+	var b := Polygon2D.new()
+	b.color = Color(0.35, 0.02, 0.02, 0.75)
+	b.z_index = -1
+	var pts := PackedVector2Array()
+	var n := 9
+	for i in range(n):
+		var a := TAU * float(i) / float(n)
+		var r := s * (0.7 + 0.6 * absf(sin(a * 2.3 + pos.x)))
+		pts.append(Vector2(cos(a), sin(a)) * r)
+	b.polygon = pts
+	b.position = pos
+	add_child(b)
+
+func _paper(pos: Vector2, rot: float) -> void:
+	var p := Polygon2D.new()
+	p.color = Color(0.85, 0.85, 0.8, 0.9)
+	p.z_index = -1
+	p.polygon = PackedVector2Array([Vector2(-9, -6), Vector2(9, -6), Vector2(9, 6), Vector2(-9, 6)])
+	p.position = pos
+	p.rotation = rot
+	add_child(p)
+
+func _build_horror() -> void:
+	_blood_spot(Vector2(300, 300), 26.0)
+	_blood_spot(Vector2(340, 320), 14.0)
+	_blood_spot(Vector2(700, 560), 30.0)
+	_blood_spot(Vector2(740, 590), 12.0)
+	_blood_spot(Vector2(1120, 500), 22.0)
+	_blood_spot(Vector2(200, 620), 18.0)
+	_blood_spot(Vector2(640, 180), 16.0)
+	_paper(Vector2(420, 280), 0.4)
+	_paper(Vector2(460, 300), -0.7)
+	_paper(Vector2(560, 480), 1.1)
+	_paper(Vector2(900, 300), 0.2)
+	_paper(Vector2(940, 340), -1.2)
+	_paper(Vector2(300, 560), 0.9)
+	_paper(Vector2(1080, 300), -0.4)
+	_paper(Vector2(640, 620), 0.6)
+	for pos in [Vector2(400, 260), Vector2(880, 420), Vector2(640, 620)]:
+		var fl := PointLight2D.new()
+		fl.position = pos
+		fl.color = Color(1, 0.85, 0.6, 1)
+		fl.energy = 0.9
+		fl.texture_scale = 2.5
+		add_child(fl)
+		flicker_lights.append(fl)
+		flicker_base.append(0.9)
+	var red := PointLight2D.new()
+	red.position = Vector2(1149, 142)
+	red.color = Color(0.9, 0.1, 0.1, 1)
+	red.energy = 0.5
+	red.texture_scale = 2.0
+	add_child(red)
+	var chair_tex := load(PROP_BASE + "Seating/office_chair/office_chair_front.png") as Texture2D
+	if chair_tex != null:
+		var root := Node2D.new()
+		root.position = Vector2(980, 420)
+		root.rotation = PI / 2.0
+		ysort.add_child(root)
+		var spr := Sprite2D.new()
+		spr.texture = chair_tex
+		root.add_child(spr)
 
 func _build_cell() -> void:
 	var room := Polygon2D.new()
@@ -231,6 +343,15 @@ func _process(delta: float) -> void:
 		warn_timer -= delta
 		if warn_timer <= 0.0:
 			hud_warn_label.text = ""
+	flicker_timer += delta
+	if flicker_timer > 0.12:
+		flicker_timer = 0.0
+		for i in range(flicker_lights.size()):
+			var f := flicker_lights[i]
+			if randf() < 0.12:
+				f.energy = flicker_base[i] * randf_range(0.15, 0.5)
+			else:
+				f.energy = flicker_base[i] * randf_range(0.85, 1.05)
 	if multiplayer.is_server() and not game_over:
 		_update_tasks(delta)
 		_update_pickups()
@@ -631,8 +752,8 @@ func _build_props() -> void:
 	_place_prop(tplant, Vector2(1210, 660), true, Vector2(18, 16))
 	_place_prop(cooler, Vector2(1210, 620), true, Vector2(20, 16))
 	_place_prop(trash, Vector2(1150, 620), true, Vector2(16, 12))
-	_place_prop(trash, Vector2(320, 200), true, Vector2(16, 12))
-	_place_prop(trash, Vector2(960, 200), true, Vector2(16, 12))
+	_place_prop(trash, Vector2(320, 232), true, Vector2(16, 12))
+	_place_prop(trash, Vector2(960, 232), true, Vector2(16, 12))
 	_place_prop(trash, Vector2(760, 520), true, Vector2(16, 12))
 
 func _place_prop(rel: String, pos: Vector2, solid: bool, col_size: Vector2) -> void:

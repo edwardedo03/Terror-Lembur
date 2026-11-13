@@ -113,15 +113,19 @@ func _physics_process(delta: float) -> void:
 func _pick_waypoint() -> void:
 	for i in range(8):
 		var p := Vector2(rng.randf_range(80, 1200), rng.randf_range(100, 680))
-		if level.BOSS_ROOM.has_point(p) and not level.BOSS_ROOM.has_point(global_position):
-			continue
-		if level.MEETING_ROOM.has_point(p) and not level.MEETING_ROOM.has_point(global_position):
+		if _in_other_room(p):
 			continue
 		target = p
 		waypoint_timer = 0.0
 		return
 	target = Vector2(rng.randf_range(80, 1200), rng.randf_range(100, 680))
 	waypoint_timer = 0.0
+
+func _in_other_room(p: Vector2) -> bool:
+	for room in level.ALL_ROOMS:
+		if room.has_point(p) and not room.has_point(global_position):
+			return true
+	return false
 
 func _update_patrol(_delta: float) -> void:
 	waypoint_timer += _delta
