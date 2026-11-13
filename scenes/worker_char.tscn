@@ -274,6 +274,35 @@ animations = [{
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_iutbn"]
 radius = 7.0
 
+[sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_sync"]
+properties/0/path = NodePath(".:position")
+properties/0/spawn = true
+properties/0/replication_mode = 2
+properties/1/path = NodePath(".:velocity")
+properties/1/spawn = false
+properties/1/replication_mode = 2
+properties/2/path = NodePath(".:facing")
+properties/2/spawn = false
+properties/2/replication_mode = 2
+properties/3/path = NodePath(".:interacting")
+properties/3/spawn = false
+properties/3/replication_mode = 2
+properties/4/path = NodePath(".:interact_target")
+properties/4/spawn = false
+properties/4/replication_mode = 2
+properties/5/path = NodePath(".:hiding")
+properties/5/spawn = false
+properties/5/replication_mode = 2
+properties/6/path = NodePath(".:locked")
+properties/6/spawn = false
+properties/6/replication_mode = 2
+properties/7/path = NodePath(".:flashlight_on")
+properties/7/spawn = false
+properties/7/replication_mode = 2
+properties/8/path = NodePath(".:has_throwable")
+properties/8/spawn = false
+properties/8/replication_mode = 2
+
 [node name="CharacterBody2D" type="CharacterBody2D" unique_id=377897477]
 script = ExtResource("1_kumnw")
 
@@ -285,3 +314,20 @@ frame_progress = 0.9612677
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="." unique_id=341479299]
 shape = SubResource("CapsuleShape2D_iutbn")
+
+[node name="Camera2D" type="Camera2D" parent="."]
+enabled = false
+zoom = Vector2(2, 2)
+limit_left = 0
+limit_top = 0
+limit_right = 1280
+limit_bottom = 736
+
+[node name="Flashlight" type="PointLight2D" parent="."]
+color = Color(1, 0.95, 0.8, 1)
+energy = 1.2
+texture_scale = 4.0
+shadow_enabled = false
+
+[node name="MultiplayerSynchronizer" type="MultiplayerSynchronizer" parent="."]
+replication_config = SubResource("SceneReplicationConfig_sync")
