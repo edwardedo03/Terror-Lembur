@@ -1,3 +1,16 @@
-[gd_scene format=3 uid="uid://cdmir1cqpmm24"]
+[gd_scene load_steps=3 format=3 uid="uid://cdmir1cqpmm24"]
 
-[node name="Level_1" type="Node2D" unique_id=773509877]
+[ext_resource type="Script" path="res://scripts/level_1.gd" id="1_level"]
+[ext_resource type="Script" path="res://scripts/network.gd" id="2_net"]
+
+[node name="Level1" type="Node2D"]
+script = ExtResource("1_level")
+
+[node name="YSort" type="Node2D" parent="."]
+y_sort_enabled = true
+
+[node name="Spawner" type="MultiplayerSpawner" parent="."]
+spawn_path = NodePath("../YSort")
+
+[node name="Network" type="Node" parent="."]
+script = ExtResource("2_net")
