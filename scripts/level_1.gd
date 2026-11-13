@@ -201,7 +201,7 @@ func _build_partitions(layer: TileMapLayer) -> void:
 
 func _build_darkness() -> void:
 	var mod := CanvasModulate.new()
-	mod.color = Color(0.22, 0.22, 0.28)
+	mod.color = Color(0.35, 0.35, 0.4)
 	add_child(mod)
 
 func _blood_spot(pos: Vector2, s: float) -> void:

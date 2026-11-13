@@ -29,6 +29,8 @@ var name_label: Label
 @onready var camera: Camera2D = $Camera2D
 @onready var light: PointLight2D = $Flashlight
 
+const CONE_TEX := preload("res://assets/flashlight_cone.png")
+
 func _enter_tree() -> void:
 	set_multiplayer_authority(name.to_int())
 
@@ -37,6 +39,10 @@ func _ready() -> void:
 	camera.enabled = is_multiplayer_authority()
 	camera.position_smoothing_enabled = true
 	camera.position_smoothing_speed = 6.0
+	light.texture = CONE_TEX
+	light.texture_scale = 2.0
+	light.energy = 1.6
+	light.enabled = flashlight_on
 	var is_ara := name.to_int() == 1
 	var char_name := "ARA" if is_ara else "BIMA"
 	var name_color := Color(1.0, 0.85, 0.4) if is_ara else Color(0.6, 0.85, 1.0)
@@ -183,7 +189,8 @@ func _process(_delta: float) -> void:
 					lvl2.play_sfx("step", -16.0, randf_range(0.92, 1.08))
 	else:
 		sprite.play("idle_" + _dir_name(facing))
-	light.position = facing * 24.0
+	light.position = facing * 12.0
+	light.rotation = facing.angle()
 
 func _dir_name(dir: Vector2) -> String:
 	if dir == Vector2.RIGHT:
