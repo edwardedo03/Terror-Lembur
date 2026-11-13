@@ -4,6 +4,7 @@ const PORT := 7000
 const MAX_PLAYERS := 2
 const DISCOVERY_PORT := 7001
 const DISCOVERY_MSG := "TERROR_LEMBUR"
+const DISCOVER_REQUEST := "TERROR_LEMBUR?DISCOVER"
 
 var player_scene: PackedScene = preload("res://scenes/worker_char.tscn")
 
@@ -15,11 +16,15 @@ var ip_input: LineEdit
 var status_label: Label
 var server_list_vbox: VBoxContainer
 var server_list_label: Label
+var ip_hint_label: Label
 
 var discover_udp: PacketPeerUDP
 var listen_udp: PacketPeerUDP
 var discovered: Dictionary = {}
+var listed_ips: Array = []
 var discover_timer := 0.0
+var request_timer := 0.0
+var broadcast_targets: Array[String] = []
 var is_hosting := false
 var is_listening := false
 var menu_title: Label
@@ -57,21 +62,38 @@ func _process(delta: float) -> void:
 		discover_timer += delta
 		if discover_timer >= 1.0:
 			discover_timer = 0.0
-			discover_udp.put_packet((DISCOVERY_MSG + ":" + str(PORT)).to_utf8_buffer())
+			for target in broadcast_targets:
+				discover_udp.set_dest_address(target, DISCOVERY_PORT)
+				var err := discover_udp.put_packet((DISCOVERY_MSG + ":" + str(PORT)).to_utf8_buffer())
+				if err != OK:
+					print("DISCOVERY broadcast ke ", target, " gagal: ", err)
 	if is_listening and listen_udp:
 		while listen_udp.get_available_packet_count() > 0:
 			var pkt := listen_udp.get_packet()
 			var sender_ip := listen_udp.get_packet_ip()
 			var text := pkt.get_string_from_utf8()
-			if text.begins_with(DISCOVERY_MSG):
+			if text == DISCOVER_REQUEST:
+				if is_hosting and discover_udp:
+					discover_udp.set_dest_address(sender_ip, DISCOVERY_PORT)
+					discover_udp.put_packet((DISCOVERY_MSG + ":" + str(PORT)).to_utf8_buffer())
+					print("DISCOVERY balas ke ", sender_ip)
+			elif text.begins_with(DISCOVERY_MSG):
 				discovered[sender_ip] = Time.get_ticks_msec()
+		if is_listening and not is_hosting and discover_udp:
+			request_timer += delta
+			if request_timer >= 1.0:
+				request_timer = 0.0
+				for target in broadcast_targets:
+					discover_udp.set_dest_address(target, DISCOVERY_PORT)
+					discover_udp.put_packet(DISCOVER_REQUEST.to_utf8_buffer())
 		var now := Time.get_ticks_msec()
-		var changed := false
 		for ip in discovered.keys():
 			if now - int(discovered[ip]) > 3000:
 				discovered.erase(ip)
-				changed = true
-		if changed or discovered.size() != server_list_vbox.get_child_count():
+		var current := discovered.keys()
+		current.sort()
+		if current != listed_ips:
+			listed_ips = current.duplicate()
 			_refresh_server_list()
 	if menu != null and menu.visible and menu_title != null:
 		menu_flicker_t += delta
@@ -100,7 +122,6 @@ func host() -> void:
 	multiplayer.multiplayer_peer = peer
 	_hide_menu()
 	_show_hud()
-	_stop_listening()
 	_start_broadcast()
 	spawn_player(1)
 	_set_status("Hosting di port %d. Menunggu pemain 2..." % PORT)
@@ -169,13 +190,26 @@ func _show_hud() -> void:
 	if lvl != null and lvl.has_method("show_hud"):
 		lvl.show_hud()
 
+func _compute_broadcast_targets() -> Array[String]:
+	var targets: Array[String] = ["255.255.255.255"]
+	for ip in IP.get_local_addresses():
+		if ip.begins_with("127.") or ip.begins_with("169.254.") or ":" in ip:
+			continue
+		var parts := ip.split(".")
+		if parts.size() == 4:
+			var bcast := "%s.%s.%s.255" % [parts[0], parts[1], parts[2]]
+			if bcast not in targets:
+				targets.append(bcast)
+	return targets
+
 func _start_broadcast() -> void:
 	discover_udp = PacketPeerUDP.new()
 	discover_udp.set_broadcast_enabled(true)
 	discover_udp.set_dest_address("255.255.255.255", DISCOVERY_PORT)
+	broadcast_targets = _compute_broadcast_targets()
 	is_hosting = true
 	discover_timer = 0.0
-	print("DISCOVERY broadcasting on ", DISCOVERY_PORT)
+	print("DISCOVERY broadcasting on ", DISCOVERY_PORT, " ke ", broadcast_targets)
 
 func _stop_broadcast() -> void:
 	is_hosting = false
@@ -188,16 +222,31 @@ func _start_listening() -> void:
 	var err := listen_udp.bind(DISCOVERY_PORT)
 	if err != OK:
 		print("DISCOVERY listen failed: ", err)
+		_set_status("Auto-detect gagal (port 7001 dipakai). Pakai join manual.")
 		listen_udp = null
 		return
+	discover_udp = PacketPeerUDP.new()
+	discover_udp.set_broadcast_enabled(true)
+	broadcast_targets = _compute_broadcast_targets()
 	is_listening = true
-	print("DISCOVERY listening on ", DISCOVERY_PORT)
+	request_timer = 0.0
+	var my_ips: Array[String] = []
+	for ip in IP.get_local_addresses():
+		if ip.begins_with("127.") or ":" in ip:
+			continue
+		my_ips.append(ip)
+	if ip_hint_label:
+		ip_hint_label.text = "IP PC ini: " + ", ".join(my_ips) + "  (pastikan 2 PC satu WiFi)"
+	print("DISCOVERY listening on ", DISCOVERY_PORT, " target: ", broadcast_targets)
 
 func _stop_listening() -> void:
 	is_listening = false
 	if listen_udp:
 		listen_udp.close()
 		listen_udp = null
+	if discover_udp and not is_hosting:
+		discover_udp.close()
+		discover_udp = null
 
 func _refresh_server_list() -> void:
 	if server_list_vbox == null:
@@ -288,6 +337,9 @@ func _build_menu() -> void:
 	server_list_vbox = VBoxContainer.new()
 	server_list_vbox.add_theme_constant_override("separation", 6)
 	pvb.add_child(server_list_vbox)
+	ip_hint_label = UITheme.make_label("", UITheme.body_font(), 13, Color(0.55, 0.55, 0.55))
+	ip_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	pvb.add_child(ip_hint_label)
 	var manual_label := UITheme.make_label("Atau join manual pakai IP:", UITheme.body_font(), 14, UITheme.COL_GREY)
 	manual_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	pvb.add_child(manual_label)
