@@ -111,6 +111,15 @@ func _physics_process(delta: float) -> void:
 	_check_catch()
 
 func _pick_waypoint() -> void:
+	for i in range(8):
+		var p := Vector2(rng.randf_range(80, 1200), rng.randf_range(100, 680))
+		if level.BOSS_ROOM.has_point(p) and not level.BOSS_ROOM.has_point(global_position):
+			continue
+		if level.MEETING_ROOM.has_point(p) and not level.MEETING_ROOM.has_point(global_position):
+			continue
+		target = p
+		waypoint_timer = 0.0
+		return
 	target = Vector2(rng.randf_range(80, 1200), rng.randf_range(100, 680))
 	waypoint_timer = 0.0
 
@@ -158,6 +167,13 @@ func _update_search(delta: float) -> void:
 		state_timer = 0.0
 
 func _update_return(_delta: float) -> void:
+	if state_timer > 8.0:
+		global_position = level.boss_room_center()
+		velocity = Vector2.ZERO
+		state = State.PATROL
+		state_timer = 0.0
+		_pick_waypoint()
+		return
 	_move_toward(level.boss_room_center(), SPEED_RETURN * speed_mult)
 	if global_position.distance_to(level.boss_room_center()) < 40.0:
 		state = State.PATROL

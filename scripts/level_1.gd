@@ -17,6 +17,7 @@ const TASK_DEFS := [
 ]
 const CELL_POS := Vector2(1180, 140)
 const BOSS_ROOM := Rect2(1050, 64, 198, 156)
+const MEETING_ROOM := Rect2(480, 288, 352, 320)
 const INTERACT_RANGE := 80.0
 
 var ysort: Node2D
@@ -67,6 +68,7 @@ func _ready() -> void:
 	for y in range(2, ROOM_H - 1):
 		_set_wall(wall_layer, 0, y, Vector2i(3, 1))
 		_set_wall(wall_layer, ROOM_W - 1, y, Vector2i(5, 1))
+	_build_partitions(wall_layer)
 	ysort = $"YSort"
 	spawner = $"Spawner"
 	_build_props()
@@ -88,6 +90,24 @@ func _ready() -> void:
 
 func _set_wall(layer: TileMapLayer, x: int, y: int, atlas: Vector2i) -> void:
 	layer.set_cell(Vector2i(x, y), 1, atlas)
+
+func _build_partitions(layer: TileMapLayer) -> void:
+	var h := Vector2i(7, 0)
+	var v := Vector2i(3, 1)
+	var v2 := Vector2i(5, 1)
+	for y in [2, 3, 6]:
+		_set_wall(layer, 32, y, v)
+	for x in range(32, 39):
+		_set_wall(layer, x, 7, h)
+	for x in range(15, 19):
+		_set_wall(layer, x, 9, h)
+	for x in range(21, 26):
+		_set_wall(layer, x, 9, h)
+	for x in range(15, 26):
+		_set_wall(layer, x, 18, h)
+	for y in range(9, 19):
+		_set_wall(layer, 15, y, v)
+		_set_wall(layer, 25, y, v2)
 
 func _build_darkness() -> void:
 	var mod := CanvasModulate.new()
