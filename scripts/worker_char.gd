@@ -23,6 +23,7 @@ var hide_spot := Vector2.ZERO
 var stamina := 100.0
 var sprinting := false
 var step_timer := 0.0
+var name_label: Label
 
 @onready var sprite: AnimatedSprite2D = $AnimatedSprite2D
 @onready var camera: Camera2D = $Camera2D
@@ -36,8 +37,23 @@ func _ready() -> void:
 	camera.enabled = is_multiplayer_authority()
 	camera.position_smoothing_enabled = true
 	camera.position_smoothing_speed = 6.0
-	if name.to_int() != 1:
+	var is_ara := name.to_int() == 1
+	var char_name := "ARA" if is_ara else "BIMA"
+	var name_color := Color(1.0, 0.85, 0.4) if is_ara else Color(0.6, 0.85, 1.0)
+	if not is_ara:
 		sprite.modulate = Color(0.65, 0.85, 1.0)
+	else:
+		sprite.modulate = Color(1.0, 0.92, 0.7)
+	name_label = Label.new()
+	name_label.text = char_name
+	name_label.position = Vector2(-24, -56)
+	name_label.size = Vector2(48, 16)
+	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_label.add_theme_font_size_override("font_size", 13)
+	name_label.add_theme_color_override("font_color", name_color)
+	name_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 1))
+	name_label.add_theme_constant_override("outline_size", 5)
+	add_child(name_label)
 	if name.to_int() == 1:
 		position = Vector2(320, 320)
 	else:
@@ -131,10 +147,14 @@ func _toggle_hide() -> void:
 	hide_spot = spot
 	global_position = spot
 	sprite.modulate.a = 0.45
+	if name_label != null:
+		name_label.modulate.a = 0.45
 
 func _unhide() -> void:
 	hiding = false
 	sprite.modulate.a = 1.0
+	if name_label != null:
+		name_label.modulate.a = 1.0
 
 func _throw() -> void:
 	has_throwable = false
@@ -177,6 +197,8 @@ func set_locked(value: bool) -> void:
 		interacting = false
 		hiding = false
 		sprite.modulate.a = 1.0
+		if name_label != null:
+			name_label.modulate.a = 1.0
 
 @rpc("any_peer", "call_local")
 func give_throwable() -> void:

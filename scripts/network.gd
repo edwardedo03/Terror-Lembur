@@ -244,7 +244,7 @@ func _build_menu() -> void:
 	vb.add_child(badge_row)
 	var badge := PanelContainer.new()
 	UITheme.apply_panel(badge, Color(0.25, 0.05, 0.05, 0.92), UITheme.COL_BLOOD, 1, 4)
-	badge.add_child(UITheme.make_label("2 PEMAIN  •  LAN  •  GOTONG ROYONG", UITheme.body_font(), 14, UITheme.COL_GOLD))
+	badge.add_child(UITheme.make_label("2 PEMAIN  •  LAN  •  GOTONG ROYONG  •  ARA & BIMA", UITheme.body_font(), 14, UITheme.COL_GOLD))
 	badge_row.add_child(badge)
 	var tag := UITheme.make_label("Dua karyawan lembur. Satu bos yang tidak pernah pulang.", UITheme.body_font(), 16, UITheme.COL_PAPER)
 	tag.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
