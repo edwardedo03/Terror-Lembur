@@ -1,6 +1,8 @@
 extends CharacterBody2D
 
 const SPEED := 200.0
+const ACCEL := 1400.0
+const FRICTION := 1600.0
 const SHOUT_COOLDOWN := 5.0
 const SHOUT_RADIUS := 500.0
 
@@ -26,6 +28,8 @@ func _enter_tree() -> void:
 func _ready() -> void:
 	bot_mode = "--bot" in OS.get_cmdline_user_args()
 	camera.enabled = is_multiplayer_authority()
+	camera.position_smoothing_enabled = true
+	camera.position_smoothing_speed = 6.0
 	if name.to_int() != 1:
 		sprite.modulate = Color(0.65, 0.85, 1.0)
 	if name.to_int() == 1:
@@ -55,7 +59,10 @@ func _physics_process(delta: float) -> void:
 		input_dir = Input.get_vector("left", "right", "up", "down")
 	if locked or hiding or interacting:
 		input_dir = Vector2.ZERO
-	velocity = input_dir * SPEED
+	if input_dir.length() > 0.1:
+		velocity = velocity.move_toward(input_dir.normalized() * SPEED, ACCEL * delta)
+	else:
+		velocity = velocity.move_toward(Vector2.ZERO, FRICTION * delta)
 	move_and_slide()
 	_update_actions(input_dir)
 

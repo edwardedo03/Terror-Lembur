@@ -48,13 +48,22 @@ var flicker_lights: Array[PointLight2D] = []
 var flicker_base: Array[float] = []
 var flicker_timer := 0.0
 
-var hud_task_label: Label
+var hud_layer: CanvasLayer = null
+var hud_task_bars: Array[ProgressBar] = []
+var hud_task_rows: Array[Label] = []
+var hud_timer_label: Label
+var hud_boss_label: Label
 var hud_prompt_label: Label
 var hud_warn_label: Label
 var hud_status_label: Label
+var elapsed := 0.0
+var times_caught := 0
+var shake_strength := 0.0
+var local_camera: Camera2D = null
 var end_panel: PanelContainer
 var end_title: Label
 var end_detail: Label
+var end_stars: Array[Label] = []
 
 func _ready() -> void:
 	var tile_set := load(TILESET_PATH) as TileSet
@@ -89,6 +98,10 @@ func _ready() -> void:
 	_build_tasks()
 	_build_pickups()
 	_build_hud()
+	if not (multiplayer.multiplayer_peer is OfflineMultiplayerPeer):
+		show_hud()
+	elif "--host" in OS.get_cmdline_user_args() or "--join" in OS.get_cmdline_user_args():
+		show_hud()
 	lit_areas.append(Vector2(640, 700))
 	spawner.add_spawnable_scene(BOSS_SCENE)
 	spawner.add_spawnable_scene(THROWABLE_SCENE)
@@ -297,22 +310,64 @@ func _update_pickups() -> void:
 				child.rpc_id(int(child.name), "give_throwable")
 				break
 
+func show_hud() -> void:
+	if hud_layer != null:
+		hud_layer.visible = true
+
 func _build_hud() -> void:
 	var hud := CanvasLayer.new()
 	hud.name = "HUD"
+	hud_layer = hud
+	hud.visible = false
 	add_child(hud)
-	hud_task_label = Label.new()
-	hud_task_label.position = Vector2(16, 12)
-	hud_task_label.add_theme_font_size_override("font_size", 16)
-	hud_task_label.add_theme_color_override("font_color", Color(1, 1, 1, 1))
-	hud.add_child(hud_task_label)
+	var task_panel := PanelContainer.new()
+	task_panel.position = Vector2(12, 10)
+	task_panel.custom_minimum_size = Vector2(250, 0)
+	hud.add_child(task_panel)
+	var tvb := VBoxContainer.new()
+	tvb.add_theme_constant_override("separation", 4)
+	task_panel.add_child(tvb)
+	var task_head := Label.new()
+	task_head.text = "TUGAS"
+	task_head.add_theme_font_size_override("font_size", 15)
+	task_head.add_theme_color_override("font_color", Color(1, 0.85, 0.3, 1))
+	tvb.add_child(task_head)
+	hud_task_bars.clear()
+	hud_task_rows.clear()
+	for tp in tasks:
+		if tp.task_id == 4:
+			continue
+		var row := Label.new()
+		row.text = "☐ " + tp.label_text
+		row.add_theme_font_size_override("font_size", 15)
+		row.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+		tvb.add_child(row)
+		hud_task_rows.append(row)
+		var bar := ProgressBar.new()
+		bar.min_value = 0.0
+		bar.max_value = 1.0
+		bar.value = 0.0
+		bar.custom_minimum_size = Vector2(220, 10)
+		bar.show_percentage = false
+		tvb.add_child(bar)
+		hud_task_bars.append(bar)
+	hud_timer_label = Label.new()
+	hud_timer_label.position = Vector2(1080, 12)
+	hud_timer_label.add_theme_font_size_override("font_size", 18)
+	hud_timer_label.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+	hud.add_child(hud_timer_label)
+	hud_boss_label = Label.new()
+	hud_boss_label.position = Vector2(1080, 40)
+	hud_boss_label.add_theme_font_size_override("font_size", 15)
+	hud_boss_label.add_theme_color_override("font_color", Color(1, 0.3, 0.3, 1))
+	hud.add_child(hud_boss_label)
 	hud_warn_label = Label.new()
 	hud_warn_label.position = Vector2(440, 12)
 	hud_warn_label.add_theme_font_size_override("font_size", 20)
 	hud_warn_label.add_theme_color_override("font_color", Color(1, 0.3, 0.3, 1))
 	hud.add_child(hud_warn_label)
 	hud_status_label = Label.new()
-	hud_status_label.position = Vector2(16, 44)
+	hud_status_label.position = Vector2(16, 210)
 	hud_status_label.add_theme_font_size_override("font_size", 15)
 	hud_status_label.add_theme_color_override("font_color", Color(1, 0.85, 0.3, 1))
 	hud.add_child(hud_status_label)
@@ -324,21 +379,42 @@ func _build_hud() -> void:
 	end_panel = PanelContainer.new()
 	end_panel.visible = false
 	end_panel.set_anchors_preset(Control.PRESET_CENTER)
-	end_panel.custom_minimum_size = Vector2(560, 260)
+	end_panel.custom_minimum_size = Vector2(560, 300)
 	hud.add_child(end_panel)
 	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 8)
 	end_panel.add_child(vb)
 	end_title = Label.new()
 	end_title.add_theme_font_size_override("font_size", 32)
 	end_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vb.add_child(end_title)
+	var star_row := HBoxContainer.new()
+	star_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	star_row.add_theme_constant_override("separation", 8)
+	vb.add_child(star_row)
+	end_stars.clear()
+	for i in range(3):
+		var s := Label.new()
+		s.text = "★"
+		s.add_theme_font_size_override("font_size", 40)
+		s.add_theme_color_override("font_color", Color(0.3, 0.3, 0.3, 1))
+		star_row.add_child(s)
+		end_stars.append(s)
 	end_detail = Label.new()
 	end_detail.add_theme_font_size_override("font_size", 17)
 	end_detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	end_detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	vb.add_child(end_detail)
+	var again_btn := Button.new()
+	again_btn.text = "Main Lagi (R)"
+	again_btn.custom_minimum_size = Vector2(0, 40)
+	again_btn.add_theme_font_size_override("font_size", 18)
+	again_btn.pressed.connect(func() -> void: rpc("_restart_game"))
+	vb.add_child(again_btn)
 
 func _process(delta: float) -> void:
+	if not game_over:
+		elapsed += delta
 	if warn_timer > 0.0:
 		warn_timer -= delta
 		if warn_timer <= 0.0:
@@ -352,6 +428,16 @@ func _process(delta: float) -> void:
 				f.energy = flicker_base[i] * randf_range(0.15, 0.5)
 			else:
 				f.energy = flicker_base[i] * randf_range(0.85, 1.05)
+	if local_camera == null:
+		var me := _my_player()
+		if me != null:
+			local_camera = me.get_node_or_null("Camera2D") as Camera2D
+	if shake_strength > 0.0:
+		shake_strength = maxf(0.0, shake_strength - delta * 22.0)
+		if local_camera != null:
+			local_camera.offset = Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * shake_strength
+	elif local_camera != null and local_camera.offset != Vector2.ZERO:
+		local_camera.offset = Vector2.ZERO
 	if multiplayer.is_server() and not game_over:
 		_update_tasks(delta)
 		_update_pickups()
@@ -494,10 +580,15 @@ func _show_end(title: String, detail: String, s: int) -> void:
 	game_result = title
 	stars = s
 	end_title.text = title
-	var star_text := ""
-	for i in range(s):
-		star_text += "★"
-	end_detail.text = detail + "\n\nBintang: " + star_text + "\n\nTekan R untuk main lagi."
+	for i in range(end_stars.size()):
+		if i < s:
+			end_stars[i].add_theme_color_override("font_color", Color(1, 0.85, 0.2, 1))
+		else:
+			end_stars[i].add_theme_color_override("font_color", Color(0.3, 0.3, 0.3, 1))
+	var mins := int(elapsed) / 60
+	var secs := int(elapsed) % 60
+	var time_txt := "%d:%02d" % [mins, secs]
+	end_detail.text = detail + "\n\nWaktu: " + time_txt + "   |   Ketangkep: " + str(times_caught) + "x"
 	end_panel.visible = true
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -509,16 +600,36 @@ func _restart_game() -> void:
 	get_tree().reload_current_scene()
 
 func _update_hud() -> void:
-	var lines := ""
+	var bi := 0
 	for tp in tasks:
 		if tp.task_id == 4:
 			continue
-		var mark := "✓" if tp.done else "☐"
-		var extra := ""
-		if tp.task_id == 3 and not _main_tasks_done():
-			extra = " (terkunci)"
-		lines += mark + " " + tp.label_text + extra + "\n"
-	hud_task_label.text = lines
+		if bi < hud_task_rows.size():
+			var mark := "✓" if tp.done else "☐"
+			var extra := ""
+			if tp.task_id == 3 and not _main_tasks_done():
+				extra = " (terkunci)"
+			hud_task_rows[bi].text = mark + " " + tp.label_text + extra
+			if tp.done:
+				hud_task_rows[bi].add_theme_color_override("font_color", Color(0.5, 1, 0.5, 1))
+			else:
+				hud_task_rows[bi].add_theme_color_override("font_color", Color(1, 1, 1, 1))
+		if bi < hud_task_bars.size():
+			hud_task_bars[bi].value = tp.progress
+		bi += 1
+	var mins := int(elapsed) / 60
+	var secs := int(elapsed) % 60
+	hud_timer_label.text = "%d:%02d" % [mins, secs]
+	var boss_d := _boss_distance()
+	if boss_d >= 0.0 and boss_d < 400.0:
+		if boss_d < 150.0:
+			hud_boss_label.text = "BOS SANGAT DEKAT!"
+		elif boss_d < 260.0:
+			hud_boss_label.text = "Bos dekat..."
+		else:
+			hud_boss_label.text = "Ada yang mengawasi..."
+	else:
+		hud_boss_label.text = ""
 	var locked_names := ""
 	for child in ysort.get_children():
 		if not _is_player(child):
@@ -550,6 +661,15 @@ func _update_hud() -> void:
 				hud_prompt_label.text = "Q: lempar barang  |  F: teriak  |  R: senter  |  C: ngumpet di bawah meja"
 			else:
 				hud_prompt_label.text = "E: interaksi  |  F: teriak  |  R: senter  |  C: ngumpet di bawah meja"
+
+func _boss_distance() -> float:
+	var me := _my_player()
+	if me == null or boss == null:
+		return -1.0
+	return me.global_position.distance_to(boss.global_position)
+
+func add_shake(amount: float) -> void:
+	shake_strength = maxf(shake_strength, amount)
 
 func _my_player() -> Node2D:
 	var my_id := multiplayer.get_unique_id()
@@ -646,12 +766,15 @@ func consume_noise() -> Vector2:
 
 func on_player_caught(player: Node2D) -> void:
 	ever_caught = true
+	times_caught += 1
+	add_shake(10.0)
 	player.global_position = CELL_POS
 	player.rpc_id(int(player.name), "set_locked", true)
 	hud_warn_label.text = "TEMANMU DITANGKAP!"
 	warn_timer = 3.0
 
 func on_boss_chase() -> void:
+	add_shake(3.0)
 	hud_warn_label.text = "BOS MENGEJAR!"
 	warn_timer = 2.0
 
@@ -660,6 +783,7 @@ func on_boss_telegraph() -> void:
 	warn_timer = 1.2
 
 func on_boss_teleported(dest: Vector2) -> void:
+	add_shake(6.0)
 	hud_warn_label.text = "Bos muncul di dekatmu!"
 	warn_timer = 2.0
 

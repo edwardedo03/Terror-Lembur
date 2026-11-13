@@ -187,10 +187,11 @@ func _update_return(_delta: float) -> void:
 func _move_toward(dest: Vector2, speed: float) -> void:
 	var dir := dest - global_position
 	if dir.length() < 4.0:
-		velocity = Vector2.ZERO
+		velocity = velocity.move_toward(Vector2.ZERO, 900.0 * get_physics_process_delta_time())
 		return
 	dir = dir.normalized()
-	velocity = dir * speed
+	var want := dir * speed
+	velocity = velocity.lerp(want, clampf(6.0 * get_physics_process_delta_time(), 0.0, 1.0))
 	facing = dir
 
 func _update_detection() -> void:

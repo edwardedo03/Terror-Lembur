@@ -32,6 +32,7 @@ func _ready() -> void:
 	multiplayer.server_disconnected.connect(_on_server_disconnected)
 	if not (multiplayer.multiplayer_peer is OfflineMultiplayerPeer):
 		_hide_menu()
+		_show_hud()
 		if multiplayer.is_server():
 			spawn_player(1)
 			for id in multiplayer.get_peers():
@@ -88,6 +89,7 @@ func host() -> void:
 		return
 	multiplayer.multiplayer_peer = peer
 	_hide_menu()
+	_show_hud()
 	_stop_listening()
 	_start_broadcast()
 	spawn_player(1)
@@ -106,6 +108,7 @@ func join(ip: String) -> void:
 		return
 	multiplayer.multiplayer_peer = peer
 	_hide_menu()
+	_show_hud()
 	_stop_listening()
 	_set_status("Menghubungi %s:%d ..." % [ip, PORT])
 	print("JOIN connecting to ", ip, ":", PORT)
@@ -150,6 +153,11 @@ func _set_status(text: String) -> void:
 func _hide_menu() -> void:
 	if menu:
 		menu.visible = false
+
+func _show_hud() -> void:
+	var lvl := get_parent()
+	if lvl != null and lvl.has_method("show_hud"):
+		lvl.show_hud()
 
 func _start_broadcast() -> void:
 	discover_udp = PacketPeerUDP.new()
@@ -200,30 +208,52 @@ func _build_menu() -> void:
 	menu = CanvasLayer.new()
 	menu.name = "Menu"
 	add_child(menu)
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.75)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	menu.add_child(dim)
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	menu.add_child(center)
 	var panel := PanelContainer.new()
-	panel.set_anchors_preset(Control.PRESET_CENTER)
-	panel.custom_minimum_size = Vector2(360, 340)
-	menu.add_child(panel)
+	panel.custom_minimum_size = Vector2(460, 0)
+	center.add_child(panel)
 	var margin := MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", 24)
 	margin.add_theme_constant_override("margin_right", 24)
-	margin.add_theme_constant_override("margin_top", 20)
-	margin.add_theme_constant_override("margin_bottom", 20)
+	margin.add_theme_constant_override("margin_top", 16)
+	margin.add_theme_constant_override("margin_bottom", 16)
 	panel.add_child(margin)
 	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 10)
+	vbox.add_theme_constant_override("separation", 6)
 	margin.add_child(vbox)
 	var title := Label.new()
 	title.text = "TERROR LEMBUR"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 28)
+	title.add_theme_font_size_override("font_size", 32)
+	title.add_theme_color_override("font_color", Color(0.9, 0.15, 0.15, 1))
 	vbox.add_child(title)
-	var sub := Label.new()
-	sub.text = "Multiplayer Lokal (LAN)"
-	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vbox.add_child(sub)
+	var tag := Label.new()
+	tag.text = "Dua karyawan lembur. Satu bos yang tidak pernah pulang."
+	tag.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	tag.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tag.add_theme_font_size_override("font_size", 13)
+	tag.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85, 1))
+	vbox.add_child(tag)
+	var sep := HSeparator.new()
+	vbox.add_child(sep)
+	var how := Label.new()
+	how.text = "WASD gerak  |  E tahan: tugas  |  Q lempar  |  F teriak\nR senter  |  C ngumpet  |  Selesaikan 3 tugas, kabur lewat PINTU KELUAR"
+	how.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	how.add_theme_font_size_override("font_size", 13)
+	how.add_theme_color_override("font_color", Color(0.9, 0.9, 0.9, 1))
+	vbox.add_child(how)
+	var sep2 := HSeparator.new()
+	vbox.add_child(sep2)
 	var host_btn := Button.new()
 	host_btn.text = "Host (Buat Server)"
+	host_btn.custom_minimum_size = Vector2(0, 36)
+	host_btn.add_theme_font_size_override("font_size", 17)
 	host_btn.pressed.connect(host)
 	vbox.add_child(host_btn)
 	server_list_label = Label.new()
@@ -243,6 +273,8 @@ func _build_menu() -> void:
 	vbox.add_child(ip_input)
 	var join_btn := Button.new()
 	join_btn.text = "Join Server"
+	join_btn.custom_minimum_size = Vector2(0, 36)
+	join_btn.add_theme_font_size_override("font_size", 17)
 	join_btn.pressed.connect(func() -> void: join(ip_input.text.strip_edges()))
 	vbox.add_child(join_btn)
 	status_label = Label.new()
