@@ -51,11 +51,21 @@ var flicker_timer := 0.0
 var hud_layer: CanvasLayer = null
 var hud_task_bars: Array[ProgressBar] = []
 var hud_task_rows: Array[Label] = []
+var hud_task_count: Label
 var hud_timer_label: Label
 var hud_boss_label: Label
+var hud_boss_row: HBoxContainer
+var hud_boss_dot: PanelContainer
 var hud_prompt_label: Label
+var hud_prompt_pill: PanelContainer
+var hud_prompt_bar: ProgressBar
 var hud_warn_label: Label
 var hud_status_label: Label
+var hud_status_pill: PanelContainer
+var hud_edge_rects: Array[ColorRect] = []
+var hud_pulse_t := 0.0
+var end_dim: ColorRect
+var end_center: CenterContainer
 var elapsed := 0.0
 var times_caught := 0
 var shake_strength := 0.0
@@ -321,94 +331,174 @@ func _build_hud() -> void:
 	hud.visible = false
 	add_child(hud)
 	var task_panel := PanelContainer.new()
+	UITheme.apply_panel(task_panel, Color(0.05, 0.05, 0.06, 0.85), Color(0.42, 0.36, 0.3), 1, 8)
 	task_panel.position = Vector2(12, 10)
-	task_panel.custom_minimum_size = Vector2(250, 0)
+	task_panel.custom_minimum_size = Vector2(264, 0)
 	hud.add_child(task_panel)
 	var tvb := VBoxContainer.new()
-	tvb.add_theme_constant_override("separation", 4)
+	tvb.add_theme_constant_override("separation", 5)
 	task_panel.add_child(tvb)
-	var task_head := Label.new()
-	task_head.text = "TUGAS"
-	task_head.add_theme_font_size_override("font_size", 15)
-	task_head.add_theme_color_override("font_color", Color(1, 0.85, 0.3, 1))
-	tvb.add_child(task_head)
+	var head_row := HBoxContainer.new()
+	tvb.add_child(head_row)
+	var task_head := UITheme.make_label("TUGAS", UITheme.body_font(), 16, UITheme.COL_GOLD)
+	head_row.add_child(task_head)
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head_row.add_child(spacer)
+	hud_task_count = UITheme.make_label("0/3", UITheme.body_font(), 14, UITheme.COL_GREY)
+	head_row.add_child(hud_task_count)
+	var divider := ColorRect.new()
+	divider.color = Color(0.62, 0.5, 0.22, 0.9)
+	divider.custom_minimum_size = Vector2(0, 2)
+	tvb.add_child(divider)
 	hud_task_bars.clear()
 	hud_task_rows.clear()
 	for tp in tasks:
 		if tp.task_id == 4:
 			continue
-		var row := Label.new()
-		row.text = "☐ " + tp.label_text
-		row.add_theme_font_size_override("font_size", 15)
-		row.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+		var row := UITheme.make_label("\u2610 " + tp.label_text, UITheme.body_font(), 15, UITheme.COL_PAPER)
 		tvb.add_child(row)
 		hud_task_rows.append(row)
 		var bar := ProgressBar.new()
 		bar.min_value = 0.0
 		bar.max_value = 1.0
 		bar.value = 0.0
-		bar.custom_minimum_size = Vector2(220, 10)
+		bar.custom_minimum_size = Vector2(232, 9)
 		bar.show_percentage = false
+		UITheme.apply_progress_bar(bar)
 		tvb.add_child(bar)
 		hud_task_bars.append(bar)
-	hud_timer_label = Label.new()
-	hud_timer_label.position = Vector2(1080, 12)
-	hud_timer_label.add_theme_font_size_override("font_size", 18)
-	hud_timer_label.add_theme_color_override("font_color", Color(1, 1, 1, 1))
-	hud.add_child(hud_timer_label)
-	hud_boss_label = Label.new()
-	hud_boss_label.position = Vector2(1080, 40)
-	hud_boss_label.add_theme_font_size_override("font_size", 15)
-	hud_boss_label.add_theme_color_override("font_color", Color(1, 0.3, 0.3, 1))
-	hud.add_child(hud_boss_label)
-	hud_warn_label = Label.new()
-	hud_warn_label.position = Vector2(440, 12)
-	hud_warn_label.add_theme_font_size_override("font_size", 20)
-	hud_warn_label.add_theme_color_override("font_color", Color(1, 0.3, 0.3, 1))
+	var status_panel := PanelContainer.new()
+	UITheme.apply_panel(status_panel, Color(0.05, 0.05, 0.06, 0.85), Color(0.42, 0.36, 0.3), 1, 8)
+	status_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	status_panel.position = Vector2(-268, 10)
+	status_panel.custom_minimum_size = Vector2(256, 0)
+	hud.add_child(status_panel)
+	var svb := VBoxContainer.new()
+	svb.add_theme_constant_override("separation", 4)
+	status_panel.add_child(svb)
+	var timer_row := HBoxContainer.new()
+	svb.add_child(timer_row)
+	timer_row.add_child(UITheme.make_label("WAKTU", UITheme.body_font(), 13, UITheme.COL_GREY))
+	var tspacer := Control.new()
+	tspacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	timer_row.add_child(tspacer)
+	hud_timer_label = UITheme.make_label("0:00", UITheme.body_font(), 20, UITheme.COL_PAPER)
+	timer_row.add_child(hud_timer_label)
+	hud_boss_row = HBoxContainer.new()
+	hud_boss_row.add_theme_constant_override("separation", 8)
+	hud_boss_row.visible = false
+	svb.add_child(hud_boss_row)
+	hud_boss_dot = PanelContainer.new()
+	UITheme.apply_panel(hud_boss_dot, UITheme.COL_BLOOD, UITheme.COL_BLOOD_BRIGHT, 1, 14)
+	hud_boss_dot.custom_minimum_size = Vector2(28, 28)
+	var dot_lbl := UITheme.make_label("!", UITheme.body_font(), 16, Color.WHITE)
+	dot_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	dot_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	hud_boss_dot.add_child(dot_lbl)
+	hud_boss_row.add_child(hud_boss_dot)
+	hud_boss_label = UITheme.make_label("", UITheme.body_font(), 15, UITheme.COL_BLOOD_BRIGHT)
+	hud_boss_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	hud_boss_row.add_child(hud_boss_label)
+	hud_warn_label = UITheme.make_label("", UITheme.title_font(), 30, UITheme.COL_BLOOD_BRIGHT)
+	hud_warn_label.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	hud_warn_label.offset_top = 16
+	hud_warn_label.offset_bottom = 60
+	hud_warn_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hud_warn_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 1))
+	hud_warn_label.add_theme_constant_override("outline_size", 8)
+	hud_warn_label.visible = false
 	hud.add_child(hud_warn_label)
-	hud_status_label = Label.new()
-	hud_status_label.position = Vector2(16, 210)
-	hud_status_label.add_theme_font_size_override("font_size", 15)
-	hud_status_label.add_theme_color_override("font_color", Color(1, 0.85, 0.3, 1))
-	hud.add_child(hud_status_label)
-	hud_prompt_label = Label.new()
-	hud_prompt_label.position = Vector2(440, 680)
-	hud_prompt_label.add_theme_font_size_override("font_size", 16)
-	hud_prompt_label.add_theme_color_override("font_color", Color(1, 1, 1, 1))
-	hud.add_child(hud_prompt_label)
+	hud_status_pill = PanelContainer.new()
+	UITheme.apply_panel(hud_status_pill, Color(0.2, 0.12, 0.02, 0.9), UITheme.COL_GOLD, 1, 14)
+	hud_status_pill.position = Vector2(16, 226)
+	hud_status_pill.custom_minimum_size = Vector2(0, 0)
+	hud_status_pill.visible = false
+	hud.add_child(hud_status_pill)
+	hud_status_label = UITheme.make_label("", UITheme.body_font(), 15, UITheme.COL_GOLD)
+	hud_status_pill.add_child(hud_status_label)
+	var prompt_center := CenterContainer.new()
+	prompt_center.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	prompt_center.offset_top = -76
+	prompt_center.offset_bottom = -8
+	prompt_center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.add_child(prompt_center)
+	hud_prompt_pill = PanelContainer.new()
+	UITheme.apply_panel(hud_prompt_pill, Color(0.05, 0.05, 0.06, 0.88), UITheme.COL_GOLD, 1, 16)
+	hud_prompt_pill.custom_minimum_size = Vector2(640, 0)
+	hud_prompt_pill.visible = false
+	prompt_center.add_child(hud_prompt_pill)
+	var prompt_vb := VBoxContainer.new()
+	prompt_vb.add_theme_constant_override("separation", 4)
+	hud_prompt_pill.add_child(prompt_vb)
+	hud_prompt_label = UITheme.make_label("", UITheme.body_font(), 16, UITheme.COL_PAPER)
+	hud_prompt_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hud_prompt_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	prompt_vb.add_child(hud_prompt_label)
+	hud_prompt_bar = ProgressBar.new()
+	hud_prompt_bar.min_value = 0.0
+	hud_prompt_bar.max_value = 1.0
+	hud_prompt_bar.value = 0.0
+	hud_prompt_bar.custom_minimum_size = Vector2(460, 8)
+	hud_prompt_bar.show_percentage = false
+	hud_prompt_bar.visible = false
+	UITheme.apply_progress_bar(hud_prompt_bar)
+	prompt_vb.add_child(hud_prompt_bar)
+	for i in range(4):
+		var edge := ColorRect.new()
+		edge.color = Color(0.9, 0.1, 0.1, 0.0)
+		edge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		if i == 0:
+			edge.set_anchors_preset(Control.PRESET_TOP_WIDE)
+			edge.offset_bottom = 22
+		elif i == 1:
+			edge.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+			edge.offset_top = -22
+		elif i == 2:
+			edge.set_anchors_preset(Control.PRESET_LEFT_WIDE)
+			edge.offset_right = 22
+		else:
+			edge.set_anchors_preset(Control.PRESET_RIGHT_WIDE)
+			edge.offset_left = -22
+		hud.add_child(edge)
+		hud_edge_rects.append(edge)
+	end_dim = ColorRect.new()
+	end_dim.color = Color(0, 0, 0, 0.65)
+	end_dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	end_dim.visible = false
+	hud.add_child(end_dim)
+	end_center = CenterContainer.new()
+	end_center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	end_center.visible = false
+	hud.add_child(end_center)
 	end_panel = PanelContainer.new()
-	end_panel.visible = false
-	end_panel.set_anchors_preset(Control.PRESET_CENTER)
-	end_panel.custom_minimum_size = Vector2(560, 300)
-	hud.add_child(end_panel)
+	UITheme.apply_panel(end_panel, Color(0.07, 0.05, 0.05, 0.95), UITheme.COL_BLOOD, 2, 12)
+	end_panel.custom_minimum_size = Vector2(580, 0)
+	end_center.add_child(end_panel)
 	var vb := VBoxContainer.new()
-	vb.add_theme_constant_override("separation", 8)
+	vb.add_theme_constant_override("separation", 10)
 	end_panel.add_child(vb)
-	end_title = Label.new()
-	end_title.add_theme_font_size_override("font_size", 32)
+	end_title = UITheme.make_label("", UITheme.title_font(), 44, UITheme.COL_BLOOD_BRIGHT)
 	end_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vb.add_child(end_title)
 	var star_row := HBoxContainer.new()
 	star_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	star_row.add_theme_constant_override("separation", 8)
+	star_row.add_theme_constant_override("separation", 10)
 	vb.add_child(star_row)
 	end_stars.clear()
 	for i in range(3):
-		var s := Label.new()
-		s.text = "★"
-		s.add_theme_font_size_override("font_size", 40)
-		s.add_theme_color_override("font_color", Color(0.3, 0.3, 0.3, 1))
+		var s := UITheme.make_label("\u2605", UITheme.title_font(), 56, Color(0.3, 0.3, 0.3, 1))
+		s.pivot_offset = Vector2(28, 28)
 		star_row.add_child(s)
 		end_stars.append(s)
-	end_detail = Label.new()
-	end_detail.add_theme_font_size_override("font_size", 17)
+	end_detail = UITheme.make_label("", UITheme.body_font(), 17, UITheme.COL_PAPER)
 	end_detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	end_detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	vb.add_child(end_detail)
 	var again_btn := Button.new()
 	again_btn.text = "Main Lagi (R)"
-	again_btn.custom_minimum_size = Vector2(0, 40)
-	again_btn.add_theme_font_size_override("font_size", 18)
+	again_btn.custom_minimum_size = Vector2(0, 44)
+	UITheme.apply_button(again_btn, 18)
 	again_btn.pressed.connect(func() -> void: rpc("_restart_game"))
 	vb.add_child(again_btn)
 
@@ -419,6 +509,20 @@ func _process(delta: float) -> void:
 		warn_timer -= delta
 		if warn_timer <= 0.0:
 			hud_warn_label.text = ""
+	hud_pulse_t += delta
+	hud_warn_label.visible = hud_warn_label.text != ""
+	if hud_warn_label.visible:
+		hud_warn_label.modulate.a = 0.75 + 0.25 * sin(hud_pulse_t * 8.0)
+	var boss_d := _boss_distance()
+	var edge_alpha := 0.0
+	if boss_d >= 0.0 and boss_d < 150.0:
+		edge_alpha = 0.22 + 0.12 * sin(hud_pulse_t * 7.0)
+	elif boss_d >= 0.0 and boss_d < 260.0:
+		edge_alpha = 0.1
+	for edge in hud_edge_rects:
+		edge.color = Color(0.9, 0.1, 0.1, edge_alpha)
+	if hud_boss_row.visible:
+		hud_boss_dot.modulate.a = 0.6 + 0.4 * sin(hud_pulse_t * 6.0)
 	flicker_timer += delta
 	if flicker_timer > 0.12:
 		flicker_timer = 0.0
@@ -580,16 +684,27 @@ func _show_end(title: String, detail: String, s: int) -> void:
 	game_result = title
 	stars = s
 	end_title.text = title
+	if title == "HAPPY ENDING":
+		end_title.add_theme_color_override("font_color", UITheme.COL_GREEN)
+	else:
+		end_title.add_theme_color_override("font_color", UITheme.COL_BLOOD_BRIGHT)
 	for i in range(end_stars.size()):
 		if i < s:
 			end_stars[i].add_theme_color_override("font_color", Color(1, 0.85, 0.2, 1))
 		else:
 			end_stars[i].add_theme_color_override("font_color", Color(0.3, 0.3, 0.3, 1))
+		end_stars[i].scale = Vector2(0.01, 0.01)
 	var mins := int(elapsed) / 60
 	var secs := int(elapsed) % 60
 	var time_txt := "%d:%02d" % [mins, secs]
 	end_detail.text = detail + "\n\nWaktu: " + time_txt + "   |   Ketangkep: " + str(times_caught) + "x"
+	end_dim.visible = true
+	end_center.visible = true
 	end_panel.visible = true
+	for i in range(end_stars.size()):
+		var tw := create_tween()
+		tw.tween_interval(0.12 * float(i))
+		tw.tween_property(end_stars[i], "scale", Vector2.ONE, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if game_over and event.is_action_pressed("flashlight"):
@@ -601,52 +716,66 @@ func _restart_game() -> void:
 
 func _update_hud() -> void:
 	var bi := 0
+	var done_count := 0
 	for tp in tasks:
 		if tp.task_id == 4:
 			continue
+		if tp.done:
+			done_count += 1
 		if bi < hud_task_rows.size():
-			var mark := "✓" if tp.done else "☐"
+			var mark := "\u2611" if tp.done else "\u2610"
 			var extra := ""
 			if tp.task_id == 3 and not _main_tasks_done():
 				extra = " (terkunci)"
 			hud_task_rows[bi].text = mark + " " + tp.label_text + extra
 			if tp.done:
-				hud_task_rows[bi].add_theme_color_override("font_color", Color(0.5, 1, 0.5, 1))
+				hud_task_rows[bi].add_theme_color_override("font_color", UITheme.COL_GREEN)
 			else:
-				hud_task_rows[bi].add_theme_color_override("font_color", Color(1, 1, 1, 1))
+				hud_task_rows[bi].add_theme_color_override("font_color", UITheme.COL_PAPER)
 		if bi < hud_task_bars.size():
 			hud_task_bars[bi].value = tp.progress
+			if tp.done:
+				hud_task_bars[bi].add_theme_stylebox_override("fill", UITheme.bar_fill_style(UITheme.COL_GREEN))
 		bi += 1
+	if hud_task_count != null:
+		hud_task_count.text = str(done_count) + "/3"
 	var mins := int(elapsed) / 60
 	var secs := int(elapsed) % 60
 	hud_timer_label.text = "%d:%02d" % [mins, secs]
 	var boss_d := _boss_distance()
+	var boss_txt := ""
 	if boss_d >= 0.0 and boss_d < 400.0:
 		if boss_d < 150.0:
-			hud_boss_label.text = "BOS SANGAT DEKAT!"
+			boss_txt = "BOS SANGAT DEKAT!"
 		elif boss_d < 260.0:
-			hud_boss_label.text = "Bos dekat..."
+			boss_txt = "Bos dekat..."
 		else:
-			hud_boss_label.text = "Ada yang mengawasi..."
-	else:
-		hud_boss_label.text = ""
+			boss_txt = "Ada yang mengawasi..."
+	hud_boss_label.text = boss_txt
+	hud_boss_row.visible = boss_txt != ""
 	var locked_names := ""
 	for child in ysort.get_children():
 		if not _is_player(child):
 			continue
 		if child.get("locked"):
-			locked_names += "Pemain " + str(child.name) + " DIKURUNG di ruang bos! "
+			var disp := "Pemain 1" if str(child.name) == "1" else "Pemain 2"
+			locked_names += disp + " DIKURUNG di ruang bos! "
 	if locked_names != "":
 		hud_status_label.text = locked_names + "Tahan E di TUAS SEL buat bebaskan (3 detik)."
+		hud_status_pill.visible = true
 	else:
 		hud_status_label.text = ""
+		hud_status_pill.visible = false
+	var prompt_txt := ""
+	var prompt_prog := -1.0
 	var me := _my_player()
 	if me != null and not game_over:
 		if me.get("interacting") and me.get("interact_target") >= 0:
 			var tid: int = me.get("interact_target")
 			var tp = tasks[tid] if tid < tasks.size() else null
 			if tp != null:
-				hud_prompt_label.text = "Mengerjakan " + tp.label_text + "... " + str(int(tp.progress * 100.0)) + "%"
+				prompt_txt = "Mengerjakan " + tp.label_text + "... " + str(int(tp.progress * 100.0)) + "%"
+				prompt_prog = tp.progress
 		else:
 			var nid := nearest_interactable(me.global_position)
 			if nid >= 0:
@@ -656,12 +785,18 @@ func _update_hud() -> void:
 					need_txt = " (butuh 2 orang)"
 				elif tp.task_id == 3:
 					need_txt = " (butuh 2 orang, atau 1 orang 10 detik kalau teman dikurung)"
-				hud_prompt_label.text = "Tahan E: " + tp.label_text + need_txt
+				prompt_txt = "Tahan E: " + tp.label_text + need_txt
 			elif me.get("has_throwable"):
-				hud_prompt_label.text = "Q: lempar barang  |  F: teriak  |  R: senter  |  C: ngumpet di bawah meja"
+				prompt_txt = "Q: lempar barang  |  F: teriak  |  R: senter  |  C: ngumpet di bawah meja"
 			else:
-				hud_prompt_label.text = "E: interaksi  |  F: teriak  |  R: senter  |  C: ngumpet di bawah meja"
-
+				prompt_txt = "E: interaksi  |  F: teriak  |  R: senter  |  C: ngumpet di bawah meja"
+	hud_prompt_label.text = prompt_txt
+	hud_prompt_pill.visible = prompt_txt != ""
+	if prompt_prog >= 0.0:
+		hud_prompt_bar.visible = true
+		hud_prompt_bar.value = prompt_prog
+	else:
+		hud_prompt_bar.visible = false
 func _boss_distance() -> float:
 	var me := _my_player()
 	if me == null or boss == null:

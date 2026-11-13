@@ -22,6 +22,8 @@ var discovered: Dictionary = {}
 var discover_timer := 0.0
 var is_hosting := false
 var is_listening := false
+var menu_title: Label
+var menu_flicker_t := 0.0
 
 func _ready() -> void:
 	spawner.add_spawnable_scene(player_scene.resource_path)
@@ -71,6 +73,14 @@ func _process(delta: float) -> void:
 				changed = true
 		if changed or discovered.size() != server_list_vbox.get_child_count():
 			_refresh_server_list()
+	if menu != null and menu.visible and menu_title != null:
+		menu_flicker_t += delta
+		if menu_flicker_t > 0.09:
+			menu_flicker_t = 0.0
+			if randf() < 0.07:
+				menu_title.modulate = Color(0.55, 0.55, 0.55, 1)
+			else:
+				menu_title.modulate = Color.WHITE
 
 func _make_peer() -> MultiplayerPeer:
 	if "--ws" in OS.get_cmdline_user_args():
@@ -201,6 +211,8 @@ func _refresh_server_list() -> void:
 	for ip in discovered.keys():
 		var btn := Button.new()
 		btn.text = "Join " + str(ip)
+		btn.custom_minimum_size = Vector2(0, 36)
+		UITheme.apply_button(btn, 16)
 		btn.pressed.connect(func() -> void: join(str(ip)))
 		server_list_vbox.add_child(btn)
 
@@ -209,77 +221,92 @@ func _build_menu() -> void:
 	menu.name = "Menu"
 	add_child(menu)
 	var dim := ColorRect.new()
-	dim.color = Color(0, 0, 0, 0.75)
+	dim.color = Color(0, 0, 0, 0.72)
 	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
 	menu.add_child(dim)
+	menu.add_child(UITheme.make_vignette(1280, 720))
 	var center := CenterContainer.new()
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
 	menu.add_child(center)
-	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(460, 0)
-	center.add_child(panel)
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 24)
-	margin.add_theme_constant_override("margin_right", 24)
-	margin.add_theme_constant_override("margin_top", 16)
-	margin.add_theme_constant_override("margin_bottom", 16)
-	panel.add_child(margin)
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 6)
-	margin.add_child(vbox)
-	var title := Label.new()
-	title.text = "TERROR LEMBUR"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 32)
-	title.add_theme_color_override("font_color", Color(0.9, 0.15, 0.15, 1))
-	vbox.add_child(title)
-	var tag := Label.new()
-	tag.text = "Dua karyawan lembur. Satu bos yang tidak pernah pulang."
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 10)
+	center.add_child(vb)
+	menu_title = UITheme.make_label("TERROR LEMBUR", UITheme.title_font(), 72, UITheme.COL_BLOOD_BRIGHT)
+	menu_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	menu_title.add_theme_color_override("font_outline_color", Color(0.05, 0, 0, 1))
+	menu_title.add_theme_constant_override("outline_size", 14)
+	menu_title.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.9))
+	menu_title.add_theme_constant_override("shadow_offset_x", 4)
+	menu_title.add_theme_constant_override("shadow_offset_y", 4)
+	vb.add_child(menu_title)
+	var badge_row := HBoxContainer.new()
+	badge_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	vb.add_child(badge_row)
+	var badge := PanelContainer.new()
+	UITheme.apply_panel(badge, Color(0.25, 0.05, 0.05, 0.92), UITheme.COL_BLOOD, 1, 4)
+	badge.add_child(UITheme.make_label("2 PEMAIN  •  LAN  •  GOTONG ROYONG", UITheme.body_font(), 14, UITheme.COL_GOLD))
+	badge_row.add_child(badge)
+	var tag := UITheme.make_label("Dua karyawan lembur. Satu bos yang tidak pernah pulang.", UITheme.body_font(), 16, UITheme.COL_PAPER)
 	tag.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	tag.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	tag.add_theme_font_size_override("font_size", 13)
-	tag.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85, 1))
-	vbox.add_child(tag)
+	vb.add_child(tag)
+	var panel := PanelContainer.new()
+	UITheme.apply_panel(panel)
+	panel.custom_minimum_size = Vector2(500, 0)
+	vb.add_child(panel)
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 22)
+	margin.add_theme_constant_override("margin_right", 22)
+	margin.add_theme_constant_override("margin_top", 14)
+	margin.add_theme_constant_override("margin_bottom", 14)
+	panel.add_child(margin)
+	var pvb := VBoxContainer.new()
+	pvb.add_theme_constant_override("separation", 8)
+	margin.add_child(pvb)
+	var how_head := UITheme.make_label("CARA BERMAIN", UITheme.body_font(), 14, UITheme.COL_GOLD)
+	how_head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	pvb.add_child(how_head)
+	var how := RichTextLabel.new()
+	how.bbcode_enabled = true
+	how.fit_content = true
+	how.scroll_active = false
+	how.add_theme_font_override("normal_font", UITheme.body_font())
+	how.add_theme_font_size_override("normal_font_size", 15)
+	how.add_theme_color_override("default_color", UITheme.COL_PAPER)
+	how.text = "[center][color=#ffd34d]WASD[/color] gerak   [color=#ffd34d]E[/color] tahan: tugas   [color=#ffd34d]Q[/color] lempar barang\n[color=#ffd34d]F[/color] teriak   [color=#ffd34d]R[/color] senter   [color=#ffd34d]C[/color] ngumpet di bawah meja\nSelesaikan 3 tugas, lalu kabur lewat [color=#ff5555]PINTU KELUAR[/color].[/center]"
+	pvb.add_child(how)
 	var sep := HSeparator.new()
-	vbox.add_child(sep)
-	var how := Label.new()
-	how.text = "WASD gerak  |  E tahan: tugas  |  Q lempar  |  F teriak\nR senter  |  C ngumpet  |  Selesaikan 3 tugas, kabur lewat PINTU KELUAR"
-	how.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	how.add_theme_font_size_override("font_size", 13)
-	how.add_theme_color_override("font_color", Color(0.9, 0.9, 0.9, 1))
-	vbox.add_child(how)
-	var sep2 := HSeparator.new()
-	vbox.add_child(sep2)
+	pvb.add_child(sep)
 	var host_btn := Button.new()
 	host_btn.text = "Host (Buat Server)"
-	host_btn.custom_minimum_size = Vector2(0, 36)
-	host_btn.add_theme_font_size_override("font_size", 17)
+	host_btn.custom_minimum_size = Vector2(0, 44)
+	UITheme.apply_button(host_btn, 18)
 	host_btn.pressed.connect(host)
-	vbox.add_child(host_btn)
-	server_list_label = Label.new()
-	server_list_label.text = "Mencari server di LAN..."
+	pvb.add_child(host_btn)
+	server_list_label = UITheme.make_label("Mencari server di LAN...", UITheme.body_font(), 14, UITheme.COL_GREY)
 	server_list_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vbox.add_child(server_list_label)
+	pvb.add_child(server_list_label)
 	server_list_vbox = VBoxContainer.new()
 	server_list_vbox.add_theme_constant_override("separation", 6)
-	vbox.add_child(server_list_vbox)
-	var manual_label := Label.new()
-	manual_label.text = "Atau join manual pakai IP:"
+	pvb.add_child(server_list_vbox)
+	var manual_label := UITheme.make_label("Atau join manual pakai IP:", UITheme.body_font(), 14, UITheme.COL_GREY)
 	manual_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vbox.add_child(manual_label)
+	pvb.add_child(manual_label)
 	ip_input = LineEdit.new()
 	ip_input.text = "127.0.0.1"
 	ip_input.placeholder_text = "IP server"
-	vbox.add_child(ip_input)
+	UITheme.apply_line_edit(ip_input, 16)
+	pvb.add_child(ip_input)
 	var join_btn := Button.new()
 	join_btn.text = "Join Server"
-	join_btn.custom_minimum_size = Vector2(0, 36)
-	join_btn.add_theme_font_size_override("font_size", 17)
+	join_btn.custom_minimum_size = Vector2(0, 44)
+	UITheme.apply_button(join_btn, 18)
 	join_btn.pressed.connect(func() -> void: join(ip_input.text.strip_edges()))
-	vbox.add_child(join_btn)
-	status_label = Label.new()
-	status_label.text = ""
+	pvb.add_child(join_btn)
+	status_label = UITheme.make_label("", UITheme.body_font(), 14, UITheme.COL_GOLD)
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	vbox.add_child(status_label)
+	pvb.add_child(status_label)
+	var foot := UITheme.make_label("Office Pixel Art by Imersa Studios  •  Pemrograman Gim, Universitas Katolik Indonesia Atma Jaya", UITheme.body_font(), 12, Color(0.45, 0.45, 0.45))
+	foot.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(foot)
 	_start_listening()
