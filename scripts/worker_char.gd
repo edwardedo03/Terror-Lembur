@@ -40,8 +40,8 @@ func _ready() -> void:
 	camera.position_smoothing_enabled = true
 	camera.position_smoothing_speed = 6.0
 	light.texture = CONE_TEX
-	light.texture_scale = 2.0
-	light.energy = 1.6
+	light.texture_scale = 2.5
+	light.energy = 2.5
 	light.enabled = flashlight_on
 	var is_ara := name.to_int() == 1
 	var char_name := "ARA" if is_ara else "BIMA"
