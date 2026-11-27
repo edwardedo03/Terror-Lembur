@@ -21,6 +21,7 @@ var _walls_layer: TileMapLayer = null
 var _props_layer: TileMapLayer = null
 var _extra_blockers: Array[TileMapLayer] = []  # layer penghalang tambahan (Props0, Props1, ...)
 var _blocked_doors: Dictionary = {}  # Vector2i cell -> true (masih tertutup)
+var _blocked_traps: Dictionary = {}  # Vector2i cell -> true (ada perangkap; musuh tidak boleh menginjaknya)
 
 
 # extra_blocker_layers: layer tambahan yang tiap tile-nya menghalangi jalan
@@ -63,6 +64,20 @@ func set_door_blocked(cell: Vector2i, blocked: bool) -> void:
 		_blocked_doors[cell] = true
 	else:
 		_blocked_doors.erase(cell)
+	rebuild()
+
+
+# Sel perangkap: musuh tidak boleh menginjak trap (hanya pemain yang
+# bisa memicunya). Dipanggil sekali saat level disiapkan untuk tiap
+# trap; jalur A* musuh lalu memutar melewati sel trap. Saat musuh
+# dipancing (lure) ke trap, find_path_world menjepit tujuan ke sel
+# terdekat yang bisa dilewati, jadi musuh berhenti di sebelah trap
+# (lihat enemy.gd: lure selesai saat jalur habis).
+func set_trap_blocked(cell: Vector2i, blocked: bool) -> void:
+	if blocked:
+		_blocked_traps[cell] = true
+	else:
+		_blocked_traps.erase(cell)
 	rebuild()
 
 
@@ -109,6 +124,8 @@ func _cell_id(cell: Vector2i) -> int:
 
 func _is_walkable_cell(cell: Vector2i) -> bool:
 	if cell in _blocked_doors:
+		return false
+	if cell in _blocked_traps:
 		return false
 	if _floor_layer.get_cell_source_id(cell) == -1:
 		return false

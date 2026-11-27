@@ -28,6 +28,23 @@ var _task_total: int = 0
 var _stamina_bar: ProgressBar = null
 var _stamina_fill: StyleBoxFlat = null
 
+# --- Alert musuh di tepi layar ---
+# Musuh yang mendekat (masih di luar layar) memerahkan tepi layar di
+# arah musuh berada, supaya pertemuan tidak tiba-tiba: pemain dapat
+# peringatan + arah sebelum musuh masuk ke tampilan layar.
+# ALERT_RANGE 320 px: kamera zoom 5.55 -> setengah lebar layar cuma
+# ~115 px, jadi alert sudah menyala jauh sebelum musuh terlihat.
+# Intensitas naik linear saat musuh mendekat, dan berdenyut saat CHASE.
+const ALERT_RANGE: float = 320.0
+const ALERT_MAX_ALPHA: float = 0.55
+const ALERT_THICKNESS: float = 26.0
+const ALERT_COLOR := Color(0.9, 0.12, 0.12)
+var _alert_top: ColorRect = null
+var _alert_bottom: ColorRect = null
+var _alert_left: ColorRect = null
+var _alert_right: ColorRect = null
+var _alert_time: float = 0.0
+
 
 func _ready() -> void:
 	layer = 10
@@ -41,7 +58,8 @@ func _ready() -> void:
 	_flash_rect.color = Color(0, 0, 0, 0)
 	_flash_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_flash_rect)
-	# Flash harus di bawah panel hasil: pindahkan panel ke depan.
+	_build_enemy_alert()
+	# Flash dan alert harus di bawah panel hasil: pindahkan panel ke depan.
 	if _result_panel != null:
 		move_child(_result_panel, -1)
 	if _disconnect_panel != null:
@@ -56,6 +74,7 @@ func _process(delta: float) -> void:
 	if _flash_alpha > 0.0:
 		_flash_alpha = maxf(0.0, _flash_alpha - delta * 0.8)
 		_flash_rect.color = Color(0, 0, 0, _flash_alpha)
+	_update_enemy_alert(delta)
 
 
 func set_task_total(total: int) -> void:
@@ -146,6 +165,85 @@ func flash_blackout() -> void:
 	_flash_alpha = 0.6
 
 
+func _build_enemy_alert() -> void:
+	# Empat strip merah di tepi layar (atas/bawah/kiri/kanan). Strip
+	# kiri/kanan dijepit di antara strip atas/bawah supaya sudut tidak
+	# bertumpuk dua kali lebih gelap.
+	_alert_top = _mk_alert_edge(0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, ALERT_THICKNESS)
+	_alert_bottom = _mk_alert_edge(0.0, 1.0, 1.0, 1.0, 0.0, -ALERT_THICKNESS, 0.0, 0.0)
+	_alert_left = _mk_alert_edge(0.0, 0.0, 0.0, 1.0, 0.0, ALERT_THICKNESS, ALERT_THICKNESS, -ALERT_THICKNESS)
+	_alert_right = _mk_alert_edge(1.0, 0.0, 1.0, 1.0, -ALERT_THICKNESS, ALERT_THICKNESS, 0.0, -ALERT_THICKNESS)
+
+
+func _mk_alert_edge(al: float, at: float, ar: float, ab: float, off_left: float, off_top: float, off_right: float, off_bottom: float) -> ColorRect:
+	var r := ColorRect.new()
+	r.anchor_left = al
+	r.anchor_top = at
+	r.anchor_right = ar
+	r.anchor_bottom = ab
+	r.offset_left = off_left
+	r.offset_right = off_right
+	r.offset_top = off_top
+	r.offset_bottom = off_bottom
+	r.color = Color(ALERT_COLOR.r, ALERT_COLOR.g, ALERT_COLOR.b, 0.0)
+	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(r)
+	return r
+
+
+func _update_enemy_alert(delta: float) -> void:
+	_alert_time += delta
+	var a_top: float = 0.0
+	var a_bottom: float = 0.0
+	var a_left: float = 0.0
+	var a_right: float = 0.0
+	var lv: Node = _level()
+	var running: bool = lv != null and lv.has_method("is_level_running") and bool(lv.is_level_running())
+	var enemy: Node = get_tree().get_first_node_in_group("Enemy")
+	var p: Node = null
+	if lv != null and lv.has_method("get_local_player"):
+		p = lv.get_local_player()
+	if running and enemy != null and p != null and not bool(p.get("is_downed")):
+		# Musuh hanya berbahaya saat PATROL/CHASE/SEARCH; saat BLIND /
+		# VANISH / STUNNED ia tidak bisa menangkap (_check_catch di
+		# enemy.gd langsung return), jadi alert dimatikan.
+		var st: int = int(enemy.get("state")) if enemy.get("state") != null else 0
+		if st == 0 or st == 1 or st == 2:
+			var d: Vector2 = (enemy as Node2D).global_position - (p as Node2D).global_position
+			var dist: float = d.length()
+			if dist < ALERT_RANGE and dist > 1.0:
+				var t: float = 1.0 - dist / ALERT_RANGE
+				var ax: float = absf(d.x)
+				var ay: float = absf(d.y)
+				var s: float = ax + ay
+				if s > 0.0:
+					var w: float = t * ALERT_MAX_ALPHA
+					if d.x > 0.0:
+						a_right = w * ax / s
+					elif d.x < 0.0:
+						a_left = w * ax / s
+					if d.y > 0.0:
+						a_bottom = w * ay / s
+					elif d.y < 0.0:
+						a_top = w * ay / s
+					if st == 1:  # CHASE: berdenyut supaya terasa genting
+						var pulse: float = 0.85 + 0.15 * sin(_alert_time * 6.0)
+						a_top *= pulse
+						a_bottom *= pulse
+						a_left *= pulse
+						a_right *= pulse
+	_set_alert_alpha(_alert_top, a_top)
+	_set_alert_alpha(_alert_bottom, a_bottom)
+	_set_alert_alpha(_alert_left, a_left)
+	_set_alert_alpha(_alert_right, a_right)
+
+
+func _set_alert_alpha(rect: ColorRect, alpha: float) -> void:
+	if rect == null:
+		return
+	rect.color = Color(ALERT_COLOR.r, ALERT_COLOR.g, ALERT_COLOR.b, clampf(alpha, 0.0, ALERT_MAX_ALPHA))
+
+
 func show_result(success: bool, stars: int, ending: String, time_sec: float, deaths: int, done: int, total: int) -> void:
 	if _result_panel == null:
 		return
@@ -208,7 +306,7 @@ func _build_top_bar() -> void:
 	_status_label.offset_bottom = 60
 	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	add_child(_status_label)
-	var hint := _mk_label("WASD/Panah: Gerak  |  Shift: Lari (berisik!)  |  E: Interaksi  |  Esc: Batalkan tugas", 12, UiTheme.MUTED, Vector2.ZERO)
+	var hint := _mk_label("WASD/Panah: Gerak  |  Shift: Lari (berisik!)  |  E: Interaksi  |  Esc: Batalkan tugas  |  Tepi layar merah = musuh dekat", 12, UiTheme.MUTED, Vector2.ZERO)
 	hint.anchor_top = 1.0
 	hint.anchor_bottom = 1.0
 	hint.offset_left = 12

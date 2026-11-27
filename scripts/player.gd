@@ -23,6 +23,7 @@ var is_downed: bool = false
 var carrying_revive: bool = false
 var is_sprinting: bool = false
 var iframes_left: float = 0.0
+var auto_walk_target: Vector2 = Vector2.INF  # jalan otomatis (transisi selesai level); INF = tidak aktif
 var interact_held: bool = false
 var minigame_open: bool = false
 var stamina: float = STAMINA_MAX
@@ -68,6 +69,19 @@ func _physics_process(delta: float) -> void:
 	if iframes_left > 0.0:
 		iframes_left = maxf(0.0, iframes_left - delta)
 	if not is_multiplayer_authority():
+		return
+	# Jalan otomatis keluar (transisi selesai level): abaikan input dan
+	# jalan ke target dengan kecepatan jalan biasa. Dipakai saat semua
+	# pemain sudah di pintu keluar; level yang mengatur targetnya.
+	if auto_walk_target != Vector2.INF and not is_downed and not is_hidden:
+		var to_target: Vector2 = auto_walk_target - global_position
+		if to_target.length() <= 10.0:
+			velocity = Vector2.ZERO
+			auto_walk_target = Vector2.INF
+		else:
+			velocity = to_target.normalized() * WALK_SPEED
+		move_and_slide()
+		_sync_tick(delta)
 		return
 	var level: Node = get_tree().get_first_node_in_group("LevelManager")
 	var level_running: bool = level == null or level.is_level_running()

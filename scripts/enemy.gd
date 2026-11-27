@@ -267,8 +267,12 @@ func _chase_tick(delta: float) -> void:
 			# Sampai di trap: lure selesai, timer blink mulai dari awal.
 			_lure_active = false
 			_blink_timer = randf_range(BLINK_MIN, BLINK_MAX)
-		elif _path.is_empty():
-			# Tujuan tidak bisa dicapai (path buntu) — batalkan lure.
+		elif _path.is_empty() or _path_index >= _path.size():
+			# Tujuan tidak bisa dicapai (path buntu) ATAU sudah sampai
+			# di ujung jalur — mis. trap yang sel-nya diblokir supaya
+			# musuh tidak menginjaknya, jadi jalur berhenti di sel
+			# sebelah trap. Lure selesai di sini (musuh mengintip dari
+			# sebelah trap, bukan berdiri di atasnya).
 			_lure_active = false
 
 

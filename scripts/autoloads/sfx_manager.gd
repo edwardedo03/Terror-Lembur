@@ -56,10 +56,13 @@ const _VOL: Dictionary = {
 }
 
 # --- Heartbeat (jangan terlalu besar, kata Edward) ---
+# Baseline -12 dB: cukup terdengar saat tidak ada musuh (dulu -20 dB
+# sampai tidak kedengaran sama sekali). Makin dekat musuh makin keras
+# (-8 dB) dan makin cepat (0,45 dtk).
 const HB_SLOW_INTERVAL: float = 1.0   # musuh jauh: ~60 detak/menit
 const HB_FAST_INTERVAL: float = 0.45  # musuh dekat / dikejar: ~133 detak/menit
-const HB_VOL_QUIET: float = -20.0
-const HB_VOL_LOUD: float = -14.0
+const HB_VOL_QUIET: float = -12.0
+const HB_VOL_LOUD: float = -8.0
 const HB_BEAT_LEN: float = 0.3  # panjang satu detak (lub-dub) di file
 const HB_DANGER_RANGE: float = 430.0  # jarak pandang musuh (SIGHT_RANGE)
 const HB_DANGER_CLOSE: float = 120.0  # sedekat ini = bahaya penuh
@@ -75,6 +78,14 @@ const STEP_INTERVAL_NEAR: float = 0.65   # musuh dekat tapi jalan biasa
 const STEP_VOL_FAR: float = -22.0
 const STEP_VOL_CLOSE: float = -10.0
 
+# --- Step pemain sendiri (langkah kaki sendiri saat berjalan/lari) ---
+# Diputar lokal di tiap PC, pelan saja supaya tidak mengganggu.
+const PLAYER_STEP_INTERVAL_WALK: float = 0.45
+const PLAYER_STEP_INTERVAL_SPRINT: float = 0.32
+const PLAYER_STEP_VOL_WALK: float = -18.0
+const PLAYER_STEP_VOL_SPRINT: float = -14.0
+const PLAYER_STEP_MIN_SPEED: float = 50.0  # di bawah ini dianggap diam
+
 # State.CHASE di enemy.gd (enum State: PATROL 0, CHASE 1, SEARCH 2,
 # BLIND 3, VANISH 4, STUNNED 5). Dipakai literal karena enemy.gd
 # tidak punya class_name.
@@ -89,6 +100,7 @@ var _hb_player: AudioStreamPlayer
 var _hb_timer: float = 0.0
 var _tick_timer: float = 0.0
 var _step_timer: float = 0.0
+var _player_step_timer: float = 0.0
 
 
 func _ready() -> void:
@@ -145,6 +157,8 @@ func _process(delta: float) -> void:
 		_play_heartbeat_beat(danger)
 	# Langkah kaki musuh: saat berlari (CHASE) atau dekat pemain ini.
 	_update_steps(delta, p, e)
+	# Langkah kaki pemain sendiri saat berjalan/lari.
+	_update_player_steps(delta, p)
 
 
 ## Bunyi di semua PC (host memutar lokal + menyiarkan ke peer lain).
@@ -231,6 +245,24 @@ func _update_steps(delta: float, p: Node, e: Node) -> void:
 	_step_timer -= delta
 	if _step_timer <= 0.0:
 		_step_timer = interval
+		_play_local(&"step", vol)
+
+
+func _update_player_steps(delta: float, p: Node) -> void:
+	# Langkah kaki pemain sendiri: bunyi saat bergerak (jalan/lari),
+	# pelan saja. Tidak bunyi saat diam, ngumpet, atau minigame terbuka
+	# (saat itu pemain memang tidak bergerak).
+	if bool(p.get("is_hidden")) or bool(p.get("minigame_open")):
+		return
+	var speed: float = (p.get("velocity") as Vector2).length()
+	if speed < PLAYER_STEP_MIN_SPEED:
+		return
+	var sprinting: bool = bool(p.get("is_sprinting"))
+	var interval: float = PLAYER_STEP_INTERVAL_SPRINT if sprinting else PLAYER_STEP_INTERVAL_WALK
+	var vol: float = PLAYER_STEP_VOL_SPRINT if sprinting else PLAYER_STEP_VOL_WALK
+	_player_step_timer -= delta
+	if _player_step_timer <= 0.0:
+		_player_step_timer = interval
 		_play_local(&"step", vol)
 
 

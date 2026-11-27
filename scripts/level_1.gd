@@ -24,6 +24,8 @@ const LAMP_RADIUS: float = 192.0
 const CAGE_RANGE: float = 68.0
 const EXIT_RADIUS: float = 72.0
 const EXIT_HOLD: float = 1.5
+const EXIT_WALKOUT_TIME: float = 2.5  # durasi maks jalan keluar otomatis (pengaman)
+const EXIT_WALKOUT_OFFSET: Vector2 = Vector2(0, 48)  # arah keluar: ke bawah, melewati pintu (pintu di tepi bawah peta)
 const RESCUE_TIME: float = 2.0
 const SOLO_REVIVE_DELAY: float = 12.0
 const SHARED_COOP_TYPES: Array[StringName] = [&"lan", &"backup", &"rapat"]
@@ -37,6 +39,9 @@ var _level_time: float = 0.0
 var _deaths_total: int = 0
 var _exit_open: bool = false
 var _exit_progress: float = 0.0
+var _exiting: bool = false  # transisi selesai level: pemain sedang jalan keluar otomatis
+var _exit_walkout_timer: float = 0.0
+var _exit_target: Vector2 = Vector2.ZERO  # titik di balik pintu keluar yang dituju saat walkout
 var _rescue_progress: float = 0.0
 var _cage_peer: int = -1
 var _revive_carrier: int = -1
@@ -75,6 +80,8 @@ var minigame_layer: MinigameLayer = null
 @onready var floor_layer: TileMapLayer = get_node_or_null("Floor")
 @onready var walls_layer: TileMapLayer = get_node_or_null("Walls")
 @onready var props_layer: TileMapLayer = get_node_or_null("Props")
+@onready var props0_layer: TileMapLayer = get_node_or_null("Props0")
+@onready var props1_layer: TileMapLayer = get_node_or_null("Props1")
 @onready var canvas_modulate: CanvasModulate = get_node_or_null("CanvasModulate")
 @onready var players_container: Node2D = get_node_or_null("Players")
 @onready var tasks_container: Node2D = get_node_or_null("Tasks")
@@ -158,7 +165,17 @@ func _setup_pathfinder() -> void:
 		for cell: Vector2i in d.door_cells:
 			blocked[cell] = true
 	_pathfinder = GridPathfinder.new()
-	_pathfinder.setup(floor_layer, walls_layer, props_layer, blocked)
+	# Props0/Props1 ikut jadi penghalang: objek di kedua layer itu
+	# ber-collision tapi sebelumnya tidak dikenal pathfinder, jadi musuh
+	# disuruh jalan menabraknya. DekorDinding/DekorKecil tidak ikut
+	# (tile-nya tidak punya collision, cuma hiasan).
+	_pathfinder.setup(floor_layer, walls_layer, props_layer, blocked, [props0_layer, props1_layer])
+	# Sel perangkap ikut diblokir: musuh tidak boleh menginjak trap
+	# (hanya pemain yang bisa memicunya). Jalur A* musuh memutar
+	# melewati trap; saat dipancing ke trap, musuh berhenti di
+	# sebelahnya, bukan di atasnya.
+	for tr: Node in _traps:
+		_pathfinder.set_trap_blocked(_pathfinder.world_to_cell(tr.global_position), true)
 
 
 func _setup_enemy() -> void:
@@ -1218,6 +1235,11 @@ func _tick_rescue(delta: float) -> void:
 func _tick_exit(delta: float) -> void:
 	if not _exit_open or exit_door == null:
 		return
+	# Transisi selesai level sedang berjalan: jangan hitung progres
+	# keluar lagi, tapi majukan walkout-nya.
+	if _exiting:
+		_tick_exit_walkout(delta)
+		return
 	var expected: int = 2 if NetworkManager.is_networked() else 1
 	var inside: int = 0
 	for pid: int in _players.keys():
@@ -1232,6 +1254,61 @@ func _tick_exit(delta: float) -> void:
 		_exit_progress = maxf(0.0, _exit_progress - delta)
 	exit_door.set_progress(_exit_progress)
 	if _exit_progress >= 1.0:
+		_start_exit_walkout()
+
+
+# Transisi selesai level: begitu semua pemain berkumpul di pintu
+# keluar, input dikunci dan tiap pemain otomatis berjalan keluar
+# melewati pintu (bukan langsung loncat ke layar hasil). Musuh tidak
+# bisa menangkap selama walkout (iframes). Host yang memutuskan kapan
+# walkout selesai (semua pemain sampai di titik keluar / timeout),
+# lalu _finish_level(true) menampilkan layar hasil.
+func _start_exit_walkout() -> void:
+	if _exiting or exit_door == null:
+		return
+	_exiting = true
+	_exit_walkout_timer = 0.0
+	_exit_target = exit_door.global_position + EXIT_WALKOUT_OFFSET
+	for pid: int in _players.keys():
+		var p: Node = _players[pid]
+		if p.is_downed:
+			continue
+		# Kebal selama jalan keluar, dan jalan otomatis ke titik keluar.
+		p.grant_iframes(EXIT_WALKOUT_TIME + 1.0)
+		if pid == NetworkManager.local_peer_id():
+			p.auto_walk_target = _exit_target
+	if NetworkManager.is_networked():
+		rpc("_exit_walkout_rpc", _exit_target)
+	_show_message("KABUR!")
+
+
+@rpc("authority", "call_remote", "reliable")
+func _exit_walkout_rpc(exit_target: Vector2) -> void:
+	if _exiting:
+		return
+	_exiting = true
+	_exit_walkout_timer = 0.0
+	_exit_target = exit_target
+	var p: Node = get_local_player()
+	if p != null and not p.is_downed:
+		p.auto_walk_target = _exit_target
+	_show_message("KABUR!")
+
+
+func _tick_exit_walkout(delta: float) -> void:
+	_exit_walkout_timer += delta
+	# Selesai kalau semua pemain yang hidup sudah sampai di titik
+	# keluar, atau kalau waktunya habis (pengaman kalau ada yang
+	# nyangkut di tembok / jalurnya buntu).
+	var arrived: bool = true
+	for pid: int in _players.keys():
+		var p: Node = _players[pid]
+		if p.is_downed:
+			continue
+		if p.global_position.distance_to(_exit_target) > 20.0:
+			arrived = false
+			break
+	if arrived or _exit_walkout_timer >= EXIT_WALKOUT_TIME:
 		_finish_level(true)
 
 
