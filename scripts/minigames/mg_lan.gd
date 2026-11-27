@@ -132,7 +132,9 @@ func handle_key(event: InputEventKey) -> void:
 		_lock = FLIP_BACK_DELAY
 		_first = -1
 		_set_status("Bukan pasangan... tertutup lagi!", false)
-		_report_mistake()
+		# SENGAJA tidak _report_mistake(): salah di task LAN Timur ini
+		# biasa saja, tidak memanggil musuh (permintaan Edward 27 Nov).
+		# Kartu tetap tertutup lagi + status "salah" di atas.
 
 
 func tick(delta: float) -> void:

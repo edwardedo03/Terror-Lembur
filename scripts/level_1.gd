@@ -375,6 +375,15 @@ func request_sync_rpc() -> void:
 	# state default semua.)
 	if not NetworkManager.is_server_authority():
 		return
+	# Jangan jawab sync dari game yang SUDAH BERAKHIR: snapshot-nya basi
+	# (posisi pemain di kurungan, task sudah selesai, dsb.). Klien yang
+	# minta sync akan mengulang tiap 1 detik (lihat _process) dan mendapat
+	# jawaban segar begitu host restart. Tanpa penjaga ini, klien yang
+	# reload saat restart bisa menerima snapshot pra-restart dan pemain
+	# yang tadinya terkurung malah "respawn" di posisi kurungan, bukan di
+	# tempat awal — karena _full_state_rpc memasang posisi dari host.
+	if _level_ended:
+		return
 	var sender: int = multiplayer.get_remote_sender_id()
 	var players_data: Array = []
 	for pid: int in _players.keys():
@@ -403,12 +412,20 @@ func request_sync_rpc() -> void:
 		"carrier": _revive_carrier,
 		"keys": _key_carriers.duplicate(),
 		"traps": _trap_states(),
+		"ended": _level_ended,
 	}
 	rpc_id(sender, "_full_state_rpc", data)
 
 
 @rpc("authority", "call_remote", "reliable")
 func _full_state_rpc(data: Dictionary) -> void:
+	# Abaikan snapshot dari game yang sudah berakhir (basi — mis. terkirim
+	# sesaat sebelum host restart). Kalau diterima, pemain yang tadinya
+	# terkurung akan dipasang di posisi kurungan, bukan di spawn awal.
+	# _sync_received sengaja TIDAK di-set, jadi loop retry di _process
+	# akan meminta sync lagi dan mendapat snapshot segar pasca-restart.
+	if bool(data.get("ended", false)):
+		return
 	_sync_received = true
 	_hide_join_wait_overlay()
 	for row: Array in data["players"]:

@@ -35,6 +35,7 @@ var _target_pos: Vector2 = Vector2.ZERO
 var _has_target: bool = false
 var _bob_time: float = 0.0
 var _trauma: float = 0.0
+var _base_collision_mask: int = 1
 
 @onready var sprite: AnimatedSprite2D = $AnimatedSprite2D
 @onready var name_label: Label = $NameLabel
@@ -48,6 +49,8 @@ var _facing: String = "down"
 func _ready() -> void:
 	add_to_group("Player")
 	peer_id = get_multiplayer_authority()
+	_base_collision_mask = collision_mask
+	_update_ghost_collision()
 	if player_index == 2:
 		_base_tint = Color(0.65, 0.8, 1.0)
 		name_label.text = "P2"
@@ -185,9 +188,22 @@ func apply_local_state(downed: bool, hidden: bool, carrying: bool) -> void:
 	is_downed = downed
 	is_hidden = hidden
 	carrying_revive = carrying
+	_update_ghost_collision()
 	if downed:
 		velocity = Vector2.ZERO
 		interact_held = false
+
+
+func _update_ghost_collision() -> void:
+	# Saat terkurung / sembunyi, musuh harus bisa TEMBUS pemain (tidak
+	# menyeret / memantulkan). Penyebabnya: musuh ada di collision layer 3
+	# (bit 1 ikut), pemain mask-nya 1 — jadi move_and_slide() pemain yang
+	# tetap jalan tiap frame (walau velocity 0 saat downed/hidden) akan
+	# "mende-penetrasi" dan mendorong pemain keluar dari tubuh musuh yang
+	# menabraknya. Mask 0 = tidak ada tabrakan fisik sama sekali selama
+	# downed/hidden; dikembalikan ke mask awal saat aktif lagi. Layer
+	# pemain tetap 2, jadi Area2D (trap, kunci, dsb.) tetap mendeteksinya.
+	collision_mask = 0 if (is_downed or is_hidden) else _base_collision_mask
 
 
 func broadcast_state() -> void:
@@ -220,6 +236,7 @@ func _sync_state(pos: Vector2, vel: Vector2, hidden: bool, downed: bool, carryin
 	is_downed = downed
 	carrying_revive = carrying
 	is_sprinting = sprinting
+	_update_ghost_collision()
 	if has_iframes and iframes_left <= 0.0:
 		iframes_left = 0.6
 	# Koreksi keras kalau meleset jauh (mis. teleport revive).
