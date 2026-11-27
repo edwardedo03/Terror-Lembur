@@ -156,13 +156,35 @@ func _collect_level_nodes() -> void:
 			_spots.append(s)
 
 
+func _door_cells(d: Node) -> Array[Vector2i]:
+	# Sel yang ditempati sebuah pintu terkunci: gabungan door_cells yang
+	# diisi di scene + 2 sel yang dihitung dari posisi pintu. Pintu selalu
+	# vertikal 32x64 (lihat locked_door.gd), jadi 2 selnya = kolom posisi,
+	# baris (y-16)/32 dan (y+16)/32. Pengaman ini penting: door_cells diisi
+	# manual di editor dan gampang salah salin — DoorC sempat berisi sel
+	# DoorA (9,26),(9,27), jadi sel asli Pintu C (9,35),(9,36) tetap
+	# walkable dan musuh jalan menembus pintu yang terkunci. Dengan helper
+	# ini, sel dari posisi selalu ikut terblokir walau data scene salah.
+	var cells: Array[Vector2i] = []
+	for cell: Vector2i in d.door_cells:
+		if not cells.has(cell):
+			cells.append(cell)
+	var pos: Vector2 = (d as Node2D).global_position
+	var col: int = floori(pos.x / 32.0)
+	for row: int in [floori((pos.y - 16.0) / 32.0), floori((pos.y + 16.0) / 32.0)]:
+		var c := Vector2i(col, row)
+		if not cells.has(c):
+			cells.append(c)
+	return cells
+
+
 func _setup_pathfinder() -> void:
 	if floor_layer == null or walls_layer == null:
 		push_warning("Level 1: TileMapLayer Floor/Walls tidak ditemukan; pathfinding enemy nonaktif.")
 		return
 	var blocked: Dictionary = {}
 	for d: Node in _doors.values():
-		for cell: Vector2i in d.door_cells:
+		for cell: Vector2i in _door_cells(d):
 			blocked[cell] = true
 	_pathfinder = GridPathfinder.new()
 	# Props0/Props1 ikut jadi penghalang: objek di kedua layer itu
@@ -1347,7 +1369,7 @@ func _apply_door_open(door_id: String) -> void:
 	if kitem != null:
 		kitem.hide_item()
 	if _pathfinder != null:
-		for cell: Vector2i in d.door_cells:
+		for cell: Vector2i in _door_cells(d):
 			_pathfinder.set_door_blocked(cell, false)
 
 

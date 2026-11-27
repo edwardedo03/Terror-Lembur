@@ -32,17 +32,21 @@ var _stamina_fill: StyleBoxFlat = null
 # Musuh yang mendekat (masih di luar layar) memerahkan tepi layar di
 # arah musuh berada, supaya pertemuan tidak tiba-tiba: pemain dapat
 # peringatan + arah sebelum musuh masuk ke tampilan layar.
-# ALERT_RANGE 320 px: kamera zoom 5.55 -> setengah lebar layar cuma
-# ~115 px, jadi alert sudah menyala jauh sebelum musuh terlihat.
-# Intensitas naik linear saat musuh mendekat, dan berdenyut saat CHASE.
+# Bentuknya glow gradien (bukan strip kotak): tiap tepi memakai
+# GradientTexture2D — merah pekat di tepi luar, memudar lembut ke
+# dalam sejauh ALERT_THICKNESS — jadi terbaca sebagai cahaya bahaya,
+# bukan kotak. ALERT_RANGE 320 px: kamera zoom 5.55 -> setengah lebar
+# layar cuma ~115 px, jadi alert sudah menyala jauh sebelum musuh
+# terlihat. Intensitas naik linear saat musuh mendekat, dan berdenyut
+# saat CHASE.
 const ALERT_RANGE: float = 320.0
-const ALERT_MAX_ALPHA: float = 0.55
-const ALERT_THICKNESS: float = 26.0
+const ALERT_MAX_ALPHA: float = 0.9
+const ALERT_THICKNESS: float = 110.0
 const ALERT_COLOR := Color(0.9, 0.12, 0.12)
-var _alert_top: ColorRect = null
-var _alert_bottom: ColorRect = null
-var _alert_left: ColorRect = null
-var _alert_right: ColorRect = null
+var _alert_top: TextureRect = null
+var _alert_bottom: TextureRect = null
+var _alert_left: TextureRect = null
+var _alert_right: TextureRect = null
 var _alert_time: float = 0.0
 
 
@@ -166,17 +170,33 @@ func flash_blackout() -> void:
 
 
 func _build_enemy_alert() -> void:
-	# Empat strip merah di tepi layar (atas/bawah/kiri/kanan). Strip
+	# Empat glow gradien di tepi layar (atas/bawah/kiri/kanan). Strip
 	# kiri/kanan dijepit di antara strip atas/bawah supaya sudut tidak
-	# bertumpuk dua kali lebih gelap.
-	_alert_top = _mk_alert_edge(0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, ALERT_THICKNESS)
-	_alert_bottom = _mk_alert_edge(0.0, 1.0, 1.0, 1.0, 0.0, -ALERT_THICKNESS, 0.0, 0.0)
-	_alert_left = _mk_alert_edge(0.0, 0.0, 0.0, 1.0, 0.0, ALERT_THICKNESS, ALERT_THICKNESS, -ALERT_THICKNESS)
-	_alert_right = _mk_alert_edge(1.0, 0.0, 1.0, 1.0, -ALERT_THICKNESS, ALERT_THICKNESS, 0.0, -ALERT_THICKNESS)
+	# bertumpuk dua kali lebih terang.
+	_alert_top = _mk_alert_glow(0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, ALERT_THICKNESS, Vector2(0.5, 0.0), Vector2(0.5, 1.0))
+	_alert_bottom = _mk_alert_glow(0.0, 1.0, 1.0, 1.0, 0.0, -ALERT_THICKNESS, 0.0, 0.0, Vector2(0.5, 1.0), Vector2(0.5, 0.0))
+	_alert_left = _mk_alert_glow(0.0, 0.0, 0.0, 1.0, 0.0, ALERT_THICKNESS, ALERT_THICKNESS, -ALERT_THICKNESS, Vector2(0.0, 0.5), Vector2(1.0, 0.5))
+	_alert_right = _mk_alert_glow(1.0, 0.0, 1.0, 1.0, -ALERT_THICKNESS, ALERT_THICKNESS, 0.0, -ALERT_THICKNESS, Vector2(1.0, 0.5), Vector2(0.0, 0.5))
 
 
-func _mk_alert_edge(al: float, at: float, ar: float, ab: float, off_left: float, off_top: float, off_right: float, off_bottom: float) -> ColorRect:
-	var r := ColorRect.new()
+func _mk_alert_glow(al: float, at: float, ar: float, ab: float, off_left: float, off_top: float, off_right: float, off_bottom: float, grad_from: Vector2, grad_to: Vector2) -> TextureRect:
+	# Gradien linear: merah pekat di tepi luar layar, memudar sampai
+	# transparan di tepi dalam — glow lembut, bukan kotak keras.
+	var grad := Gradient.new()
+	grad.set_color(0, Color(ALERT_COLOR.r, ALERT_COLOR.g, ALERT_COLOR.b, 0.9))
+	grad.set_color(1, Color(ALERT_COLOR.r, ALERT_COLOR.g, ALERT_COLOR.b, 0.0))
+	grad.add_point(0.45, Color(ALERT_COLOR.r, ALERT_COLOR.g, ALERT_COLOR.b, 0.3))
+	var tex := GradientTexture2D.new()
+	tex.gradient = grad
+	tex.width = 128
+	tex.height = 128
+	tex.fill = GradientTexture2D.FILL_LINEAR
+	tex.fill_from = grad_from
+	tex.fill_to = grad_to
+	var r := TextureRect.new()
+	r.texture = tex
+	r.stretch_mode = TextureRect.STRETCH_SCALE
+	r.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	r.anchor_left = al
 	r.anchor_top = at
 	r.anchor_right = ar
@@ -185,7 +205,7 @@ func _mk_alert_edge(al: float, at: float, ar: float, ab: float, off_left: float,
 	r.offset_right = off_right
 	r.offset_top = off_top
 	r.offset_bottom = off_bottom
-	r.color = Color(ALERT_COLOR.r, ALERT_COLOR.g, ALERT_COLOR.b, 0.0)
+	r.modulate = Color(1, 1, 1, 0)
 	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(r)
 	return r
@@ -238,10 +258,12 @@ func _update_enemy_alert(delta: float) -> void:
 	_set_alert_alpha(_alert_right, a_right)
 
 
-func _set_alert_alpha(rect: ColorRect, alpha: float) -> void:
+func _set_alert_alpha(rect: TextureRect, alpha: float) -> void:
 	if rect == null:
 		return
-	rect.color = Color(ALERT_COLOR.r, ALERT_COLOR.g, ALERT_COLOR.b, clampf(alpha, 0.0, ALERT_MAX_ALPHA))
+	# Intensitas (0..ALERT_MAX_ALPHA) dipetakan ke modulate (0..1);
+	# alpha gradien di dalam tekstur yang mengatur jatuhnya cahaya.
+	rect.modulate = Color(1, 1, 1, clampf(alpha / ALERT_MAX_ALPHA, 0.0, 1.0))
 
 
 func show_result(success: bool, stars: int, ending: String, time_sec: float, deaths: int, done: int, total: int) -> void:

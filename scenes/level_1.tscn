@@ -740,7 +740,7 @@ door_cells = Array[Vector2i]([Vector2i(60, 21), Vector2i(60, 22)])
 [node name="DoorC" parent="Doors" unique_id=1807051922 instance=ExtResource("ps_door")]
 position = Vector2(299, 1152)
 door_id = "C"
-door_cells = Array[Vector2i]([Vector2i(9, 26), Vector2i(9, 27)])
+door_cells = Array[Vector2i]([Vector2i(9, 35), Vector2i(9, 36)])
 
 [node name="ExitDoor" parent="." unique_id=1826463358 instance=ExtResource("ps_exit")]
 position = Vector2(1296, 1232)
