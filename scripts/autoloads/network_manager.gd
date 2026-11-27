@@ -15,7 +15,7 @@ signal connection_failed
 signal host_disconnected
 
 const PORT: int = 7777
-const MAX_PEERS: int = 2
+const MAX_PEERS: int = 1
 
 var mode: int = Mode.SOLO
 var connected_ids: Array[int] = []
