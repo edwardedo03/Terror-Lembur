@@ -1,8 +1,10 @@
 extends Node2D
 ## KeyItem — kunci pintu. Mirip ReviveItem, tapi terlihat sejak awal
 ## dan tidak hilang sendiri. Level yang memutuskan siapa membawanya.
-## Pasang 2 node (KeyItemA / KeyItemB) di scene level_1.tscn, di bawah
-## Level sejajar ReviveItem. Jangan disembunyikan di _ready.
+## Pasang satu node per pintu (KeyItemA, KeyItemB, ...) di scene
+## level_1.tscn, di bawah Level sejajar ReviveItem — duplikasi node
+## yang ada, lalu ganti huruf di NAMA node DAN di properti key_id-nya
+## (mis. KeyItemD + key_id "D"). Jangan disembunyikan di _ready.
 
 @export var key_id: String = "A"
 

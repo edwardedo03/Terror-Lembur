@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://shotdoor1234"]
+
+[ext_resource type="Script" path="res://shot_door.gd" id="1"]
+
+[node name="ShotDoor" type="Node"]
+script = ExtResource("1")

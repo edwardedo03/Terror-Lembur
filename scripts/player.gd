@@ -26,6 +26,7 @@ var iframes_left: float = 0.0
 var auto_walk_target: Vector2 = Vector2.INF  # jalan otomatis (transisi selesai level); INF = tidak aktif
 var interact_held: bool = false
 var minigame_open: bool = false
+var map_open: bool = false  # peta kantor sedang dibuka (level membekukan gerak)
 var stamina: float = STAMINA_MAX
 var _sprint_locked: bool = false
 var _regen_delay: float = 0.0
@@ -89,7 +90,9 @@ func _physics_process(delta: float) -> void:
 	var level: Node = get_tree().get_first_node_in_group("LevelManager")
 	var level_running: bool = level == null or level.is_level_running()
 	# Interact: tekan/lepas diteruskan ke Level (host yang memutuskan efeknya).
-	if Input.is_action_just_pressed("interact"):
+	# Saat peta terbuka, TEKAN baru diblokir (tidak ada interaksi baru);
+	# LEPAS tetap diteruskan supaya tidak ada status "tahan" yang nyangkut.
+	if not map_open and Input.is_action_just_pressed("interact"):
 		interact_held = true
 		if level != null:
 			level.notify_interact_pressed(peer_id)
@@ -97,7 +100,7 @@ func _physics_process(delta: float) -> void:
 		interact_held = false
 		if level != null:
 			level.notify_interact_released(peer_id)
-	if is_downed or is_hidden or minigame_open or not level_running:
+	if is_downed or is_hidden or minigame_open or map_open or not level_running:
 		velocity = Vector2.ZERO
 		move_and_slide()
 		_sync_tick(delta)
