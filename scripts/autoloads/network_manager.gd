@@ -15,7 +15,10 @@ signal connection_failed
 signal host_disconnected
 
 const PORT: int = 7777
-const MAX_PEERS: int = 2
+# Jumlah KLIEN yang boleh join. Di ENet ini jumlah klien, bukan total pemain,
+# jadi 1 = total 2 pemain (host + 1 klien). Dulu 2 sehingga pemain ke-3 bisa
+# masuk, memicu softlock revive (B1) dan spawn duplikat di posisi P2.
+const MAX_PEERS: int = 1
 
 var mode: int = Mode.SOLO
 var connected_ids: Array[int] = []
