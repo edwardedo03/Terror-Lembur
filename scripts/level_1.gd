@@ -32,6 +32,32 @@ const SHARED_COOP_TYPES: Array[StringName] = [&"lan", &"backup", &"rapat"]
 const BASE_MODULATE: Color = Color(0.077, 0.077, 0.112, 1.0)
 const BLACKOUT_MODULATE: Color = Color(0.032, 0.032, 0.052, 1.0)
 
+# --- Peta kantor: kotak ruangan saja (tanpa koridor, tanpa props) ---
+# Kotak diturunkan dari Walls layer scenes/level_1.tscn (audit headless
+# 27 Nov 2026): tiap kotak 0 sel dinding di dalamnya, label ruangan di
+# scene ada di dalam kotaknya, antar kotak tidak bertumpukan. Lorong
+# Timur sengaja tidak digambar (koridor). Rect2i dalam SEL (32 px).
+const MAP_ROOMS: Array = [
+	{"name": "Gudang", "rect": Rect2i(1, 6, 8, 9)},
+	{"name": "Toilet", "rect": Rect2i(1, 17, 8, 5)},
+	{"name": "R. Arsip", "rect": Rect2i(1, 24, 8, 15)},
+	{"name": "Pantry", "rect": Rect2i(10, 4, 11, 7)},
+	{"name": "R. Istirahat", "rect": Rect2i(22, 4, 10, 7)},
+	{"name": "R. Rapat", "rect": Rect2i(33, 2, 13, 9)},
+	{"name": "R. Manager", "rect": Rect2i(47, 4, 7, 7)},
+	{"name": "R. Keuangan", "rect": Rect2i(55, 2, 8, 9)},
+	{"name": "Area Kerja", "rect": Rect2i(10, 13, 27, 17)},
+	{"name": "R. IT", "rect": Rect2i(38, 19, 6, 8)},
+	{"name": "R. Fotokopi", "rect": Rect2i(45, 19, 6, 8)},
+	{"name": "R. HR", "rect": Rect2i(52, 19, 4, 8)},
+	{"name": "R. Serbaguna", "rect": Rect2i(10, 33, 12, 6)},
+	{"name": "R. Server", "rect": Rect2i(23, 33, 10, 6)},
+	{"name": "Lobby", "rect": Rect2i(34, 33, 13, 6)},
+	{"name": "Resepsionis", "rect": Rect2i(48, 33, 15, 6)},
+]
+# Ruang Gudang (pojok kiri atas): satu-satunya tempat peta bisa dibuka.
+const GUDANG_RECT := Rect2(32.0, 192.0, 256.0, 288.0)
+
 var _level_active: bool = false
 var _level_ended: bool = false
 var _paused_for_disconnect: bool = false
@@ -45,7 +71,7 @@ var _exit_target: Vector2 = Vector2.ZERO  # titik di balik pintu keluar yang dit
 var _rescue_progress: float = 0.0
 var _cage_peer: int = -1
 var _revive_carrier: int = -1
-var _key_carriers: Dictionary = {"A": -1, "B": -1, "C": -1}
+var _key_carriers: Dictionary = {"A": -1, "B": -1, "C": -1, "D": -1, "E": -1}
 var _revive_visible: bool = false
 var _solo_revive_timer: float = -1.0
 var _wipe_timer: float = -1.0
@@ -94,9 +120,6 @@ var minigame_layer: MinigameLayer = null
 @onready var exit_door: Node2D = get_node_or_null("ExitDoor")
 @onready var cage: Node2D = get_node_or_null("Cage")
 @onready var revive_item: Node2D = get_node_or_null("ReviveItem")
-@onready var key_item_a: Node2D = get_node_or_null("KeyItemA")
-@onready var key_item_b: Node2D = get_node_or_null("KeyItemB")
-@onready var key_item_c: Node2D = get_node_or_null("KeyItemC")
 @onready var hud: CanvasLayer = get_node_or_null("HUD")
 
 
@@ -128,6 +151,8 @@ func _ready() -> void:
 	if NetworkManager.mode == NetworkManager.Mode.CLIENT:
 		_build_join_wait_overlay()
 	_update_hud_static()
+	if hud != null:
+		hud.setup_map(MAP_ROOMS)
 
 
 func is_level_running() -> bool:
@@ -538,7 +563,7 @@ func _handle_press(peer_id: int) -> void:
 		_show_message("Item Bangkit didapat! Selamatkan temanmu di kurungan.")
 		return
 	# 3) Ambil kunci pintu.
-	for kid: String in ["A", "B", "C"]:
+	for kid: String in _key_carriers.keys():
 		var kitem: Node = _key_item_node(kid)
 		if kitem != null and int(_key_carriers.get(kid, -1)) == -1 and p.global_position.distance_to(kitem.global_position) <= KEY_RANGE:
 			_key_carriers[kid] = peer_id
@@ -616,13 +641,17 @@ func _nearest_door(pos: Vector2) -> Node:
 
 
 func _key_item_node(kid: String) -> Node:
-	match kid:
-		"A":
-			return key_item_a
-		"B":
-			return key_item_b
-		"C":
-			return key_item_c
+	# Cari kunci berdasarkan hurufnya — generik untuk A, B, C, D, E,
+	# dst. (bukan match per huruf lagi). Urutan: nama node dulu
+	# ("KeyItemD"), lalu properti key_id node-nya, supaya tetap ketemu
+	# walau Edward hanya mengganti salah satu dari keduanya saat
+	# menduplikasi di editor.
+	var by_name: Node = get_node_or_null("KeyItem" + kid)
+	if by_name != null:
+		return by_name
+	for c: Node in get_children():
+		if c.get("key_id") != null and str(c.get("key_id")) == kid:
+			return c
 	return null
 
 
@@ -757,6 +786,39 @@ func set_local_minigame_open(open: bool) -> void:
 		# Minigame ditutup -> lepas kunci tugas solo milik pemain lokal.
 		_release_task_lock(_local_task)
 		_local_task = StringName("")
+
+
+func is_minigame_open() -> bool:
+	return minigame_layer != null and minigame_layer.is_open()
+
+
+func set_local_map_open(open: bool) -> void:
+	# Dipanggil HUD saat peta dibuka/ditutup: bekukan gerak + interaksi
+	# pemain lokal seperti saat minigame terbuka (player.gd).
+	var p: Node = get_local_player()
+	if p == null:
+		return
+	p.map_open = open
+	if open:
+		p.velocity = Vector2.ZERO
+		p.interact_held = false
+
+
+func get_map_players() -> Array:
+	# Dipakai HUD untuk titik pemain di peta (lokal + teman).
+	var out: Array = []
+	var local_id: int = NetworkManager.local_peer_id()
+	for pid: int in _players.keys():
+		var p: Node = _players[pid]
+		out.append({"pos": (p as Node2D).global_position, "local": pid == local_id})
+	return out
+
+
+func _is_local_in_gudang() -> bool:
+	var p: Node = get_local_player()
+	if p == null:
+		return false
+	return GUDANG_RECT.has_point((p as Node2D).global_position)
 
 
 func _release_task_lock(tid: StringName) -> void:
@@ -1652,6 +1714,14 @@ func _update_hud_frame() -> void:
 	var local_p: Node = _players.get(NetworkManager.local_peer_id())
 	if local_p != null:
 		hud.set_stamina(local_p.get_stamina_ratio())
+		# Peta hanya tersedia saat pemain lokal di ruang Gudang, level
+		# jalan, dan tidak ada minigame terbuka; pemain yang terkurung
+		# atau sembunyi tidak bisa membuka peta. Peta yang sedang
+		# terbuka langsung ditutup begitu syaratnya tidak terpenuhi.
+		var map_ok: bool = _is_local_in_gudang() and is_level_running() and not is_minigame_open() and not local_p.is_downed and not local_p.is_hidden
+		hud.set_map_available(map_ok)
+		if hud.is_map_open() and not map_ok:
+			hud.close_map()
 
 
 func _compute_prompt() -> String:
@@ -1664,7 +1734,7 @@ func _compute_prompt() -> String:
 		return "[Tahan E] Selamatkan teman dari kurungan"
 	if _revive_visible and revive_item != null and local_p.global_position.distance_to(revive_item.global_position) <= REVIVE_RANGE:
 		return "[E] Ambil Item Bangkit"
-	for kid: String in ["A", "B", "C"]:
+	for kid: String in _key_carriers.keys():
 		var kitem: Node = _key_item_node(kid)
 		if kitem != null and int(_key_carriers.get(kid, -1)) == -1 and local_p.global_position.distance_to(kitem.global_position) <= KEY_RANGE:
 			return "[E] Ambil Kunci " + kid
@@ -1686,6 +1756,8 @@ func _compute_prompt() -> String:
 		return "[E] Sembunyi"
 	if _exit_open and exit_door != null and local_p.global_position.distance_to(exit_door.global_position) <= EXIT_RADIUS + 40.0:
 		return "Berdiri berdua di pintu keluar untuk kabur!"
+	if _is_local_in_gudang():
+		return "[M] Lihat Peta Kantor"
 	return ""
 
 

@@ -70,6 +70,15 @@ const JAM_LAPORAN_CADANGAN: Dictionary = {
 
 const F_MONO: Font = preload("res://assets/fonts/lmmono10-regular.otf")
 const F_MONO_TEBAL: Font = preload("res://assets/fonts/lmmonolt10-bold.otf")
+
+# --- Isi panduan (dropdown TAB) khusus Level 2 ---
+# Menimpa isi default Level 1 di HUD (peta M tidak ada di Level 2).
+const GUIDE_LINES_L2: Array[String] = [
+	"Bertahanlah dari jam 21.00 sampai 05.00.",
+	"Senter HP (R) butuh baterai - isi daya di titik pengisian.",
+	"Laporkan gangguan di komputer sekuriti, lalu kabur lewat pintu kaca jam 05.00.",
+	"Tekan TAB untuk membuka / menutup panduan ini.",
+]
 const PENANDA_LAPORAN: GDScript = preload("res://scripts/level2/penanda_laporan.gd")
 ## Nama singkat laporan untuk sticky note di HUD.
 const NAMA_PENDEK: Dictionary = {
@@ -230,10 +239,17 @@ func _ready() -> void:
 	# Gaya "monitor CCTV" dari proyek asal tidak dipakai di sini karena
 	# MinigameLayer upstream sudah memakai gaya UiTheme yang berbeda.
 	_update_hud_static()
+	if hud != null:
+		hud.set_guide_lines(GUIDE_LINES_L2)
 
 
 func is_level_running() -> bool:
 	return _level_active and not _level_ended and not _paused_for_disconnect
+
+
+func is_minigame_open() -> bool:
+	# Dipakai HUD: tombol TAB tidak boleh menumpuk panduan di atas minigame.
+	return minigame_layer != null and minigame_layer.is_open()
 
 
 func _collect_level_nodes() -> void:

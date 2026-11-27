@@ -3,6 +3,10 @@ extends Node2D
 ## Pintu A (barat, Arsip) dibuka tugas Arsip. Pintu B (timur, HR) dibuka
 ## tugas Panel Listrik. Keduanya hanya pintas: map tetap bisa dilalui
 ## penuh saat tertutup (dicek BFS di tools/design_map.py).
+## Pintu baru: duplikasi node ini di Doors, ganti huruf di NAMA node DAN
+## di properti door_id (mis. DoorD + door_id "D"), lalu isi door_cells
+## dengan 2 sel pintunya. Kalau door_cells lupa diisi / salah salin,
+## _door_cells() di level_1.gd tetap memblokir 2 sel dari posisi pintu.
 ## Soliditas dari StaticBody2D di sini, BUKAN dari TileMap, supaya
 ## membuka pintu tidak perlu mengubah tile.
 

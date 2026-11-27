@@ -49,6 +49,34 @@ var _alert_left: TextureRect = null
 var _alert_right: TextureRect = null
 var _alert_time: float = 0.0
 
+# --- Panduan (dropdown kanan atas, tombol TAB) ---
+# Isi default = Level 1; Level 2 menimpa lewat set_guide_lines().
+const GUIDE_LINES_L1: Array[String] = [
+	"Selesaikan 10 task untuk bisa keluar.",
+	"Peta hanya bisa dibuka di ruang Gudang (pojok kiri atas). Tekan M di sana.",
+	"Kerja samalah dengan temanmu: satu mengawasi / mengalihkan musuh, satu menyelesaikan task.",
+	"Tekan TAB untuk membuka / menutup panduan ini.",
+]
+var _guide_panel: PanelContainer = null
+var _guide_header: Button = null
+var _guide_body: VBoxContainer = null
+var _guide_open: bool = false
+
+# --- Peta kantor (tombol M, hanya saat pemain lokal di ruang Gudang) ---
+# Kotak ruangan saja (tanpa koridor, tanpa props); data ruangan datang
+# dari level lewat setup_map(). Dunia Level 1 = 2048x1280 px (64x40 sel).
+const MAP_WORLD := Vector2(2048.0, 1280.0)
+const MAP_AREA := Vector2(760.0, 476.0)
+var _map_dim: ColorRect = null
+var _map_panel: CenterContainer = null
+var _map_area: Control = null
+var _map_rooms: Array = []
+var _map_available: bool = false
+var _map_open: bool = false
+var _map_scale: float = 0.0
+var _map_dot_self: ColorRect = null
+var _map_dot_friend: ColorRect = null
+
 
 func _ready() -> void:
 	layer = 10
@@ -63,6 +91,8 @@ func _ready() -> void:
 	_flash_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_flash_rect)
 	_build_enemy_alert()
+	_build_guide()
+	_build_map()
 	# Flash dan alert harus di bawah panel hasil: pindahkan panel ke depan.
 	if _result_panel != null:
 		move_child(_result_panel, -1)
@@ -79,6 +109,184 @@ func _process(delta: float) -> void:
 		_flash_alpha = maxf(0.0, _flash_alpha - delta * 0.8)
 		_flash_rect.color = Color(0, 0, 0, _flash_alpha)
 	_update_enemy_alert(delta)
+	if _map_open:
+		_update_map_dots()
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	# TAB = panduan, M = peta (hanya kalau tersedia), ESC = tutup peta.
+	# Saat minigame terbuka semua tombol ini dimatikan: minigame punya
+	# input sendiri (termasuk ESC untuk batal), dan panduan/peta tidak
+	# boleh menumpuk di atasnya.
+	var k := event as InputEventKey
+	if k == null or not k.pressed or k.echo:
+		return
+	if _minigame_open():
+		return
+	if k.keycode == KEY_TAB:
+		toggle_guide()
+		get_viewport().set_input_as_handled()
+	elif k.keycode == KEY_M:
+		if _map_open:
+			close_map()
+		elif _map_available:
+			open_map()
+		else:
+			return
+		get_viewport().set_input_as_handled()
+	elif k.keycode == KEY_ESCAPE and _map_open:
+		close_map()
+		get_viewport().set_input_as_handled()
+
+
+func _minigame_open() -> bool:
+	var lv: Node = _level()
+	if lv == null or not lv.has_method("is_minigame_open"):
+		return false
+	return bool(lv.is_minigame_open())
+
+
+# --- Panduan ---
+
+func toggle_guide() -> void:
+	set_guide_open(not _guide_open)
+
+
+func set_guide_open(open: bool) -> void:
+	_guide_open = open
+	if _guide_body != null:
+		_guide_body.visible = open
+	if _guide_header != null:
+		_guide_header.text = "PANDUAN [TAB] - TUTUP" if open else "PANDUAN [TAB]"
+	_fit_guide_panel()
+
+
+func set_guide_lines(lines: Array[String]) -> void:
+	# Dipakai Level 2 untuk menimpa isi panduan default Level 1.
+	if _guide_body == null:
+		return
+	for c: Node in _guide_body.get_children():
+		c.queue_free()
+	for line: String in lines:
+		var l := UiTheme.mk_label("- " + line, 13, UiTheme.INK)
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		l.custom_minimum_size = Vector2(340, 0)
+		_guide_body.add_child(l)
+	_fit_guide_panel()
+
+
+# --- Peta ---
+
+func setup_map(rooms: Array) -> void:
+	# Dipanggil level sekali di _ready. Tiap ruangan: {"name": String,
+	# "rect": Rect2i} dalam SEL (32 px). Kotak digambar apa adanya:
+	# hanya ruangan, tanpa koridor dan tanpa props.
+	_map_rooms = rooms
+	if _map_area == null:
+		return
+	for c: Node in _map_area.get_children():
+		if c != _map_dot_self and c != _map_dot_friend:
+			c.queue_free()
+	_map_scale = minf(MAP_AREA.x / MAP_WORLD.x, MAP_AREA.y / MAP_WORLD.y)
+	for room: Dictionary in _map_rooms:
+		var r: Rect2i = room["rect"]
+		var box := Panel.new()
+		var style := StyleBoxFlat.new()
+		style.bg_color = Color(UiTheme.TRACK.r, UiTheme.TRACK.g, UiTheme.TRACK.b, 0.92)
+		style.border_color = UiTheme.MUTED
+		style.set_border_width_all(1)
+		style.set_corner_radius_all(0)
+		box.add_theme_stylebox_override("panel", style)
+		box.position = Vector2(r.position.x * 32.0 * _map_scale, r.position.y * 32.0 * _map_scale)
+		box.size = Vector2(r.size.x * 32.0 * _map_scale, r.size.y * 32.0 * _map_scale)
+		box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var lab := UiTheme.mk_label(str(room["name"]), 12, UiTheme.INK, null, HORIZONTAL_ALIGNMENT_CENTER)
+		lab.set_anchors_preset(Control.PRESET_FULL_RECT)
+		lab.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		lab.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		lab.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		box.add_child(lab)
+		_map_area.add_child(box)
+	# Titik pemain harus di atas kotak ruangan.
+	if _map_dot_self != null:
+		_map_area.move_child(_map_dot_self, -1)
+	if _map_dot_friend != null:
+		_map_area.move_child(_map_dot_friend, -1)
+
+
+func set_map_available(available: bool) -> void:
+	# Dipanggil level tiap frame: true hanya saat pemain lokal berdiri
+	# di ruang Gudang, level jalan, dan tidak ada minigame terbuka.
+	_map_available = available
+
+
+func is_map_open() -> bool:
+	return _map_open
+
+
+func open_map() -> void:
+	if _map_open or not _map_available or _map_rooms.is_empty():
+		return
+	if _minigame_open():
+		return
+	_map_open = true
+	if _map_dim != null:
+		_map_dim.visible = true
+	if _map_panel != null:
+		_map_panel.visible = true
+	_notify_map_open(true)
+
+
+func close_map() -> void:
+	if not _map_open:
+		return
+	_map_open = false
+	if _map_dim != null:
+		_map_dim.visible = false
+	if _map_panel != null:
+		_map_panel.visible = false
+	_notify_map_open(false)
+
+
+func toggle_map() -> void:
+	if _map_open:
+		close_map()
+	else:
+		open_map()
+
+
+func _notify_map_open(open: bool) -> void:
+	# Level membekukan gerak + interaksi pemain lokal saat peta
+	# terbuka (seperti saat minigame terbuka).
+	var lv: Node = _level()
+	if lv != null and lv.has_method("set_local_map_open"):
+		lv.set_local_map_open(open)
+
+
+func _update_map_dots() -> void:
+	var lv: Node = _level()
+	if lv == null or not lv.has_method("get_map_players") or _map_scale <= 0.0:
+		if _map_dot_self != null:
+			_map_dot_self.visible = false
+		if _map_dot_friend != null:
+			_map_dot_friend.visible = false
+		return
+	var saw_self: bool = false
+	var saw_friend: bool = false
+	for row: Dictionary in lv.get_map_players():
+		var mp: Vector2 = Vector2(row["pos"]) * _map_scale - Vector2(6, 6)
+		if bool(row["local"]):
+			_map_dot_self.position = mp
+			_map_dot_self.visible = true
+			saw_self = true
+		elif not saw_friend:
+			_map_dot_friend.position = mp
+			_map_dot_friend.visible = true
+			saw_friend = true
+	if not saw_self and _map_dot_self != null:
+		_map_dot_self.visible = false
+	if not saw_friend and _map_dot_friend != null:
+		_map_dot_friend.visible = false
 
 
 func set_task_total(total: int) -> void:
@@ -300,6 +508,125 @@ func hide_disconnect() -> void:
 	_disconnect_panel.visible = false
 
 
+func _build_guide() -> void:
+	# Dropdown kanan BAWAH, di atas tepi bawah layar. Tertutup secara
+	# default; dibuka dengan TAB atau klik header. Tinggi panel mengikuti
+	# isi lewat _fit_guide_panel (offset_bottom tetap, offset_top yang
+	# bergerak) supaya panel tumbuh ke ATAS saat dibuka.
+	_guide_panel = PanelContainer.new()
+	_guide_panel.add_theme_stylebox_override("panel", UiTheme.panel_style())
+	_guide_panel.anchor_left = 1.0
+	_guide_panel.anchor_right = 1.0
+	_guide_panel.anchor_top = 1.0
+	_guide_panel.anchor_bottom = 1.0
+	_guide_panel.offset_left = -380
+	_guide_panel.offset_right = -14
+	_guide_panel.offset_top = -70
+	_guide_panel.offset_bottom = -14
+	add_child(_guide_panel)
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 10)
+	margin.add_theme_constant_override("margin_right", 10)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	_guide_panel.add_child(margin)
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 6)
+	margin.add_child(vbox)
+	_guide_header = Button.new()
+	_guide_header.text = "PANDUAN [TAB]"
+	_guide_header.custom_minimum_size = Vector2(340, 30)
+	_guide_header.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	UiTheme.style_button(_guide_header)
+	_guide_header.pressed.connect(_on_guide_header_pressed)
+	vbox.add_child(_guide_header)
+	_guide_body = VBoxContainer.new()
+	_guide_body.add_theme_constant_override("separation", 6)
+	_guide_body.visible = false
+	vbox.add_child(_guide_body)
+	set_guide_lines(GUIDE_LINES_L1)
+	_fit_guide_panel()
+
+
+func _fit_guide_panel() -> void:
+	# Tinggi panel mengikuti isi (header saja saat tertutup, + isi saat
+	# terbuka) supaya teks tidak keluar dari kotak panel. Panel menempel
+	# di kanan bawah: offset_bottom tetap, offset_top yang bergerak,
+	# jadi panel tumbuh ke atas saat dibuka.
+	if _guide_panel == null:
+		return
+	var h: float = _guide_panel.get_combined_minimum_size().y
+	_guide_panel.offset_top = _guide_panel.offset_bottom - h
+
+
+func _on_guide_header_pressed() -> void:
+	toggle_guide()
+
+
+func _build_map() -> void:
+	# Panel peta: layar gelap + panel tengah berisi kotak ruangan.
+	# Dibangun di sini (kode) supaya tidak ada file .tscn yang berubah.
+	_map_dim = ColorRect.new()
+	_map_dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_map_dim.color = UiTheme.DIM
+	_map_dim.visible = false
+	add_child(_map_dim)
+	_map_panel = CenterContainer.new()
+	_map_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_map_panel.visible = false
+	add_child(_map_panel)
+	var panel := PanelContainer.new()
+	panel.add_theme_stylebox_override("panel", UiTheme.panel_style())
+	_map_panel.add_child(panel)
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 24)
+	margin.add_theme_constant_override("margin_right", 24)
+	margin.add_theme_constant_override("margin_top", 18)
+	margin.add_theme_constant_override("margin_bottom", 18)
+	panel.add_child(margin)
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 8)
+	margin.add_child(vbox)
+	var title := UiTheme.mk_title("Peta Kantor", 28, UiTheme.INK)
+	vbox.add_child(title)
+	var sub := UiTheme.mk_label("Denah ruangan - hanya bisa dibuka di ruang Gudang", 13, UiTheme.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
+	vbox.add_child(sub)
+	_map_area = Control.new()
+	_map_area.custom_minimum_size = MAP_AREA
+	_map_area.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(_map_area)
+	_map_dot_self = ColorRect.new()
+	_map_dot_self.color = UiTheme.GREEN
+	_map_dot_self.size = Vector2(12, 12)
+	_map_dot_self.visible = false
+	_map_dot_self.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_map_area.add_child(_map_dot_self)
+	_map_dot_friend = ColorRect.new()
+	_map_dot_friend.color = UiTheme.AMBER
+	_map_dot_friend.size = Vector2(12, 12)
+	_map_dot_friend.visible = false
+	_map_dot_friend.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_map_area.add_child(_map_dot_friend)
+	var legend := HBoxContainer.new()
+	legend.alignment = BoxContainer.ALIGNMENT_CENTER
+	legend.add_theme_constant_override("separation", 6)
+	vbox.add_child(legend)
+	var dot_self := ColorRect.new()
+	dot_self.color = UiTheme.GREEN
+	dot_self.custom_minimum_size = Vector2(10, 10)
+	dot_self.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	legend.add_child(dot_self)
+	legend.add_child(UiTheme.mk_label("Kamu", 13, UiTheme.INK))
+	var dot_friend := ColorRect.new()
+	dot_friend.color = UiTheme.AMBER
+	dot_friend.custom_minimum_size = Vector2(10, 10)
+	dot_friend.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	legend.add_child(dot_friend)
+	legend.add_child(UiTheme.mk_label("Teman", 13, UiTheme.INK))
+	var hint := UiTheme.mk_label("M / ESC - Tutup peta", 13, UiTheme.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
+	vbox.add_child(hint)
+
+
 func _build_top_bar() -> void:
 	var panel := PanelContainer.new()
 	panel.add_theme_stylebox_override("panel", UiTheme.panel_style())
@@ -328,11 +655,11 @@ func _build_top_bar() -> void:
 	_status_label.offset_bottom = 60
 	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	add_child(_status_label)
-	var hint := _mk_label("WASD/Panah: Gerak  |  Shift: Lari (berisik!)  |  E: Interaksi  |  Esc: Batalkan tugas  |  Tepi layar merah = musuh dekat", 12, UiTheme.MUTED, Vector2.ZERO)
+	var hint := _mk_label("WASD/Panah: Gerak  |  Shift: Lari (berisik!)  |  E: Interaksi  |  Esc: Batalkan tugas  |  TAB: Panduan", 12, UiTheme.MUTED, Vector2.ZERO)
 	hint.anchor_top = 1.0
 	hint.anchor_bottom = 1.0
 	hint.offset_left = 12
-	hint.offset_right = 700
+	hint.offset_right = 880
 	hint.offset_top = -26
 	hint.offset_bottom = -6
 	add_child(hint)
