@@ -183,23 +183,35 @@ func _collect_level_nodes() -> void:
 
 func _door_cells(d: Node) -> Array[Vector2i]:
 	# Sel yang ditempati sebuah pintu terkunci: gabungan door_cells yang
-	# diisi di scene + 2 sel yang dihitung dari posisi pintu. Pintu selalu
-	# vertikal 32x64 (lihat locked_door.gd), jadi 2 selnya = kolom posisi,
-	# baris (y-16)/32 dan (y+16)/32. Pengaman ini penting: door_cells diisi
-	# manual di editor dan gampang salah salin — DoorC sempat berisi sel
-	# DoorA (9,26),(9,27), jadi sel asli Pintu C (9,35),(9,36) tetap
-	# walkable dan musuh jalan menembus pintu yang terkunci. Dengan helper
-	# ini, sel dari posisi selalu ikut terblokir walau data scene salah.
+	# diisi di scene + 2 sel yang dihitung dari posisi pintu. Pintu
+	# vertikal 32x64: 2 selnya = kolom posisi, baris (y-16)/32 dan
+	# (y+16)/32. Pintu HORIZONTAL (export `horizontal` di locked_door.gd,
+	# atau node yang terlanjur diputar 90° di editor): 2 selnya = baris
+	# posisi, kolom (x-16)/32 dan (x+16)/32. Pengaman ini penting:
+	# door_cells diisi manual di editor dan gampang salah salin — DoorC
+	# sempat berisi sel DoorA (9,26),(9,27), jadi sel asli Pintu C
+	# (9,35),(9,36) tetap walkable dan musuh jalan menembus pintu yang
+	# terkunci. Dengan helper ini, sel dari posisi selalu ikut terblokir
+	# walau data scene salah. Tanpa cabang horizontal, pintu yang diputar
+	# 90° memblokir 2 sel vertikal yang salah dan musuh menembus pintunya.
 	var cells: Array[Vector2i] = []
 	for cell: Vector2i in d.door_cells:
 		if not cells.has(cell):
 			cells.append(cell)
 	var pos: Vector2 = (d as Node2D).global_position
-	var col: int = floori(pos.x / 32.0)
-	for row: int in [floori((pos.y - 16.0) / 32.0), floori((pos.y + 16.0) / 32.0)]:
-		var c := Vector2i(col, row)
-		if not cells.has(c):
-			cells.append(c)
+	var is_horiz: bool = bool(d.get("horizontal")) or absf(sin((d as Node2D).rotation)) > 0.7
+	if is_horiz:
+		var row: int = floori(pos.y / 32.0)
+		for col: int in [floori((pos.x - 16.0) / 32.0), floori((pos.x + 16.0) / 32.0)]:
+			var c := Vector2i(col, row)
+			if not cells.has(c):
+				cells.append(c)
+	else:
+		var col: int = floori(pos.x / 32.0)
+		for row: int in [floori((pos.y - 16.0) / 32.0), floori((pos.y + 16.0) / 32.0)]:
+			var c := Vector2i(col, row)
+			if not cells.has(c):
+				cells.append(c)
 	return cells
 
 
