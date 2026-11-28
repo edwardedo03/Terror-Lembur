@@ -2,7 +2,8 @@ extends Node2D
 ## Komputer security di R. Security — Level 2 (tampilan saja).
 ##
 ## Logika (menyala, error, jam) ada di level_2.gd. Level memanggil
-## set_status() di semua PC: MATI sebelum dinyalakan pertama kali,
+## set_status() di semua PC: MATI (layar standby biru berdenyut, supaya
+## mudah ditemukan) sebelum dinyalakan pertama kali,
 ## NYALA saat denah aktif, ERROR saat kabel putus (layar berkedip merah).
 
 enum Status { MATI, NYALA, ERROR }
@@ -52,10 +53,12 @@ func _terapkan() -> void:
 		return
 	match status:
 		Status.MATI:
-			# Lampu standby kecil supaya komputernya bisa ditemukan di gelap.
-			_layar.color = Color(0.05, 0.06, 0.08)
-			_cahaya.color = Color(1.0, 0.6, 0.2)
-			_cahaya.texture_scale = 0.18
+			# Layar standby biru muda yang berdenyut pelan supaya komputernya
+			# mudah ditemukan di gelap (warnanya sama dengan busur penunjuk
+			# komputer di HUD). Cahayanya lebih lebar dari lampu standby lama.
+			_layar.color = Color(0.12, 0.25, 0.42)
+			_cahaya.color = Color(0.45, 0.78, 1.0)
+			_cahaya.texture_scale = 0.32
 		Status.NYALA:
 			_layar.color = Color(0.25, 0.55, 0.9)
 			_cahaya.color = Color(0.45, 0.7, 1.0)
@@ -72,7 +75,9 @@ func _process(delta: float) -> void:
 		return
 	match status:
 		Status.MATI:
-			_cahaya.energy = 0.5 if fmod(_waktu, 1.6) < 0.8 else 0.2
+			var denyut: float = 0.5 + 0.5 * sin(_waktu * TAU / 1.6)
+			_cahaya.energy = 0.25 + 0.75 * denyut
+			_layar.color = Color(0.12, 0.25, 0.42).lerp(Color(0.35, 0.62, 0.95), denyut)
 		Status.NYALA:
 			_cahaya.energy = 0.9 + 0.08 * sin(_waktu * 9.0)
 		Status.ERROR:

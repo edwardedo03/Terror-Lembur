@@ -29,7 +29,17 @@ const EXIT_WALKOUT_OFFSET: Vector2 = Vector2(0, 48)  # arah keluar: ke bawah, me
 const RESCUE_TIME: float = 2.0
 const SOLO_REVIVE_DELAY: float = 12.0
 const SHARED_COOP_TYPES: Array[StringName] = [&"lan", &"backup", &"rapat"]
-const BASE_MODULATE: Color = Color(0.077, 0.077, 0.112, 1.0)
+# Berdua = aman (disamakan dengan Level 2, versi "sebagian"): kedua pemain
+# aman dari musuh HANYA selama sama-sama berada di alat tugas 2 pemain
+# yang belum beres. Jaraknya sama dengan syarat kumpul di _server_parts_ready.
+const JARAK_TUGAS_BERDUA: float = TASK_RANGE + 30.0
+# Huruf mesin ketik untuk popup tugas bergaya monitor (sama dengan Level 2).
+const F_MONO: Font = preload("res://assets/fonts/lmmono10-regular.otf")
+const F_MONO_TEBAL: Font = preload("res://assets/fonts/lmmonolt10-bold.otf")
+# Kegelapan dasar peta. Disesuaikan supaya suasananya lebih dekat ke
+# Level 2: ±20% lebih gelap dari semula Color(0.077, 0.077, 0.112).
+# Naikkan angkanya kalau terlalu gelap, turunkan kalau masih terlalu terang.
+const BASE_MODULATE: Color = Color(0.062, 0.062, 0.09, 1.0)
 const BLACKOUT_MODULATE: Color = Color(0.032, 0.032, 0.052, 1.0)
 
 # --- Peta kantor: kotak ruangan saja (tanpa koridor, tanpa props) ---
@@ -77,6 +87,7 @@ var _solo_revive_timer: float = -1.0
 var _wipe_timer: float = -1.0
 var _blackout_timer: float = 0.0
 var _disconnect_timer: float = -1.0
+var _pesan_menu: String = ""  # pesan untuk main menu saat kembali karena host putus
 var _progress_broadcast_timer: float = 0.0
 var _flicker_time: float = 0.0
 
@@ -97,7 +108,7 @@ var _sync_retry: float = 0.0  # timer ulang request_sync (klien saja)
 var _coop_sessions: Dictionary = {}  # tid -> {"game": MinigameBase, "players": Array[int]} (task co-op bersama)
 var _coop_last_key_peer: int = -1  # pemain terakhir yang menekan tombol di puzzle bersama
 var _coop_broadcast_timer: float = 0.0
-var _wait_overlay: CanvasLayer = null  # overlay "MENUNGGU HOST" untuk klien yang masuk duluan
+var _wait_overlay: LayarTunggu = null  # layar "MENUNGGU HOST" untuk klien yang masuk duluan
 var _traps: Array[Node] = []
 var _trap_by_id: Dictionary = {}  # trap_id -> Trap
 var _vision_timer: float = 0.0
@@ -148,6 +159,8 @@ func _ready() -> void:
 	minigame_layer = MinigameLayer.new()
 	minigame_layer.name = "MinigameLayer"
 	add_child(minigame_layer)
+	# Popup tugas bergaya monitor (seperti Level 2), pelat versi kantor.
+	minigame_layer.pakai_gaya_monitor(F_MONO, F_MONO_TEBAL, "PC LEMBUR  ·  LT. 1")
 	if NetworkManager.mode == NetworkManager.Mode.CLIENT:
 		_build_join_wait_overlay()
 	_update_hud_static()
@@ -168,6 +181,7 @@ func _collect_level_nodes() -> void:
 				"completed": false,
 				"game_type": st.game_type,
 				"requires_two": st.requires_two,
+				"ruang": _nama_ruang_di((st as Node2D).global_position),  # untuk papan tugas di HUD
 			}
 	if doors_container != null:
 		for d: Node in doors_container.get_children():
@@ -339,56 +353,40 @@ func _on_peer_left(_peer_id: int) -> void:
 		return
 	_paused_for_disconnect = true
 	if hud != null:
-		hud.show_disconnect("Partner terputus. Kembali ke menu untuk main lagi.")
+		hud.show_putus("teman_putus")
 
 
 func _on_host_disconnected() -> void:
-	if _level_ended:
-		return
 	_hide_join_wait_overlay()
-	_paused_for_disconnect = true
 	_disconnect_timer = 4.0
+	if _level_ended:
+		# Host menekan MENU UTAMA di panel hasil: teman ikut kembali.
+		_pesan_menu = "Host keluar dari game."
+		if hud != null:
+			hud.show_putus("host_keluar", _disconnect_timer)
+		return
+	_paused_for_disconnect = true
+	_pesan_menu = "Host terputus dari game."
 	if hud != null:
-		hud.show_disconnect("Host terputus. Kembali ke menu...")
+		hud.show_putus("host_putus", _disconnect_timer)
 
 
 # ------------------------------------------------------- overlay tunggu ---
 func _build_join_wait_overlay() -> void:
 	# Klien yang masuk duluan belum punya kamera pemain sampai host
-	# men-spawn dia (host masih menonton cerita) — tanpa overlay,
-	# layarnya menampilkan seluruh map mentah. Overlay gelap ini
+	# men-spawn dia (host masih menonton cerita). Tanpa layar ini, layarnya
+	# menampilkan seluruh map mentah. Layar "MENUNGGU HOST" (layar_tunggu.gd)
 	# menutupi map sampai state penuh pertama diterima dari host.
-	_wait_overlay = CanvasLayer.new()
-	_wait_overlay.layer = 100
-	_wait_overlay.name = "JoinWaitOverlay"
-	add_child(_wait_overlay)
-	var bg := ColorRect.new()
-	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	bg.color = Color(0, 0, 0, 1)
-	_wait_overlay.add_child(bg)
-	var center := CenterContainer.new()
-	center.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_wait_overlay.add_child(center)
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 12)
-	center.add_child(vbox)
-	var title := Label.new()
-	title.text = "MENUNGGU HOST..."
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 36)
-	title.add_theme_color_override("font_color", Color.WHITE)
-	vbox.add_child(title)
-	var sub := Label.new()
-	sub.text = "Host masih menonton cerita.\nGame dimulai begitu host selesai."
-	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	sub.add_theme_font_size_override("font_size", 18)
-	sub.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
-	vbox.add_child(sub)
+	var layar := LayarTunggu.new()
+	layar.name = "JoinWaitOverlay"
+	layar.level_satu = true
+	add_child(layar)
+	_wait_overlay = layar
 
 
 func _hide_join_wait_overlay() -> void:
 	if _wait_overlay != null:
-		_wait_overlay.queue_free()
+		_wait_overlay.tutup()
 		_wait_overlay = null
 
 
@@ -595,7 +593,7 @@ func _handle_press(peer_id: int) -> void:
 				kitem.hide_item()
 			_open_door(door.door_id)
 		else:
-			_show_message("Pintu %s terkunci — cari Kunci %s dulu." % [door.door_id, door.door_id])
+			_show_message("Pintu %s terkunci, cari Kunci %s dulu" % [door.door_id, door.door_id])
 		return
 	# 5) Kerjakan tugas (buka minigame di layar pemain itu).
 	var tid: StringName = _nearest_task(p.global_position)
@@ -1184,7 +1182,7 @@ func _noise_at_player(peer_id: int) -> void:
 	if p == null or enemy == null:
 		return
 	if enemy.hear_noise(p.global_position):
-		_show_message("Berisik! Musuh mendekat...")
+		_show_message("Berisik! Musuh mendekat")
 
 
 func report_minigame_progress(tid: StringName, progress: float) -> void:
@@ -1270,7 +1268,7 @@ func _complete_task(tid: StringName) -> void:
 	SfxManager.play_shared(&"complete")
 	if NetworkManager.is_networked():
 		rpc("_task_completed_rpc", String(tid))
-	_show_message("Tugas selesai: %s (%d/%d)" % [t["node"].title, _completed_count(), _tasks.size()])
+	_show_message("Tugas %s beres  %d dari %d" % [t["node"].title, _completed_count(), _tasks.size()])
 	if _completed_count() >= _tasks.size() and not _exit_open:
 		_exit_open = true
 		if exit_door != null:
@@ -1519,7 +1517,13 @@ func _revive_player(peer_id: int) -> void:
 	if p == null:
 		return
 	var pos: Vector2 = cage.global_position if cage != null else p.global_position
-	p.global_position = pos + Vector2(20, 0)
+	# Dulu: selalu digeser 20 px ke kanan -> kalau tertangkap di samping
+	# tembok/furnitur, pemain bangkit DI DALAM tembok dan nyangkut.
+	# Sekarang dicek dulu; kalau tidak muat, cari lantai kosong terdekat.
+	var tujuan: Vector2 = pos + Vector2(20, 0)
+	if not bebas_tabrakan(tujuan):
+		tujuan = posisi_aman(pos)
+	p.global_position = tujuan
 	p.velocity = Vector2.ZERO
 	p.apply_local_state(false, false, false)
 	p.grant_iframes(2.0)
@@ -1588,7 +1592,7 @@ func _apply_blackout_local() -> void:
 	var local_p: Node = _players.get(NetworkManager.local_peer_id())
 	if local_p != null:
 		local_p.add_trauma(0.55)
-	_show_message("Listrik padam sesaat... Sosok itu berpindah tempat!")
+	_show_message("Listrik padam sesaat  sosok itu berpindah tempat")
 
 
 # ---------------------------------------------------------------- ending ---
@@ -1606,25 +1610,29 @@ func _finish_level(success: bool) -> void:
 			stars = 2
 		else:
 			stars = 1
-	_apply_finished(success, stars, ending)
+	# Level 2 terbuka saat Level 1 PERTAMA KALI tamat di PC host. Dicek
+	# sebelum progres dicatat; hasilnya ikut dikirim ke teman supaya cap
+	# "LEVEL 2 TERBUKA" di panel hasil sama di kedua PC.
+	var level_baru: String = "level_2" if (success and not GameProgress.sudah_tamat(LEVEL_ID)) else ""
+	_apply_finished(success, stars, ending, level_baru)
 	if NetworkManager.is_networked():
-		rpc("_level_finished_rpc", success, stars, ending, _level_time, _deaths_total)
+		rpc("_level_finished_rpc", success, stars, ending, _level_time, _deaths_total, level_baru)
 
 
 @rpc("authority", "call_remote", "reliable")
-func _level_finished_rpc(success: bool, stars: int, ending: String, time_sec: float, deaths: int) -> void:
+func _level_finished_rpc(success: bool, stars: int, ending: String, time_sec: float, deaths: int, level_baru: String) -> void:
 	_level_time = time_sec
 	_deaths_total = deaths
 	_level_ended = true
-	_apply_finished(success, stars, ending)
+	_apply_finished(success, stars, ending, level_baru)
 
 
-func _apply_finished(success: bool, stars: int, ending: String) -> void:
+func _apply_finished(success: bool, stars: int, ending: String, level_baru: String = "") -> void:
 	if minigame_layer != null:
 		minigame_layer.force_close()
 	GameProgress.record_level_result(LEVEL_ID, stars, _level_time, ending, success)
 	if hud != null:
-		hud.show_result(success, stars, ending, _level_time, _deaths_total, _completed_count(), _tasks.size())
+		hud.show_result(success, stars, ending, _level_time, _deaths_total, _completed_count(), _tasks.size(), level_baru)
 
 
 func request_restart() -> void:
@@ -1651,13 +1659,22 @@ func _do_restart() -> void:
 	get_tree().reload_current_scene()
 
 
+## Tombol PILIH LEVEL di panel hasil (host / solo tes). Teman ikut dibawa
+## ke layar Menunggu host oleh AlurLevel; koneksi tidak diputus.
+func request_pilih_level() -> void:
+	if NetworkManager.mode == NetworkManager.Mode.CLIENT:
+		return
+	AlurLevel.kembali_ke_pilih_level()
+
+
 func request_menu() -> void:
 	_go_to_menu()
 
 
 func _go_to_menu() -> void:
-	NetworkManager.disconnect_all()
-	get_tree().change_scene_to_file("res://scenes/main_menu.tscn")
+	# Putus koneksi lalu ke main menu. _pesan_menu (kalau ada) ditampilkan
+	# sekali di main menu, misalnya "Host terputus dari game."
+	AlurLevel.ke_menu_utama(_pesan_menu)
 
 
 # ---------------------------------------------------------------- visuals ---
@@ -1754,12 +1771,12 @@ func _compute_prompt() -> String:
 	if door != null and not door.is_open:
 		if _key_carriers.get(door.door_id, -1) == NetworkManager.local_peer_id():
 			return "[E] Buka Pintu " + door.door_id
-		return "Pintu " + door.door_id + " terkunci — cari Kunci " + door.door_id
+		return "Pintu " + door.door_id + " terkunci, cari Kunci " + door.door_id
 	var tid: StringName = _nearest_task(local_p.global_position)
 	if tid != StringName(""):
 		var t: Dictionary = _tasks[tid]
 		if t["requires_two"] and _server_needed() > 1:
-			return "[E] %s — BUTUH 2 PEMAIN!" % t["node"].title
+			return "[E] %s  BUTUH 2 PEMAIN!" % t["node"].title
 		return "[E] Kerjakan: %s" % t["node"].title
 	var trap: Node = _nearest_trap(local_p.global_position, TRAP_USE_RANGE)
 	if trap != null and _can_see(trap.global_position):
@@ -1776,3 +1793,191 @@ func _compute_prompt() -> String:
 func _show_message(text: String) -> void:
 	if hud != null:
 		hud.show_message(text)
+
+
+# ============================================ info untuk HUD (gaya Level 2)
+# Dibaca scripts/hud_kantor.gd (ID card, papan tugas, busur Item Bangkit).
+func get_level_time() -> float:
+	return _level_time
+
+
+func get_exit_open() -> bool:
+	return _exit_open
+
+
+## Nama ruangan untuk posisi ini: kotak MAP_ROOMS yang berisi titiknya.
+## Di luar kotak (lorong): label ruangan terdekat di scene (mis. "Lorong
+## Timur"); kalau yang terdekat itu ruangan, jadi "Lorong dekat <ruangan>".
+func _nama_ruang_di(pos: Vector2) -> String:
+	var sel := Vector2i((pos / 32.0).floor())
+	var nama_ruang: Array[String] = []
+	for r: Dictionary in MAP_ROOMS:
+		nama_ruang.append(str(r["name"]))
+		if (r["rect"] as Rect2i).has_point(sel):
+			return str(r["name"])
+	var terdekat: String = ""
+	var jarak_terdekat: float = INF
+	var labels: Node = get_node_or_null("Labels")
+	if labels != null:
+		for l: Node in labels.get_children():
+			if l is Label:
+				var lab := l as Label
+				var d: float = (lab.global_position + lab.size * 0.5).distance_to(pos)
+				if d < jarak_terdekat:
+					jarak_terdekat = d
+					terdekat = lab.text
+	if terdekat == "":
+		return "Lorong"
+	if terdekat in nama_ruang:
+		return "Lorong dekat " + terdekat
+	return terdekat
+
+
+func get_info_tugas() -> Array:
+	# Urutan sama dengan urutan node di Tasks.
+	var daftar: Array = []
+	for tid: StringName in _tasks.keys():
+		var t: Dictionary = _tasks[tid]
+		var st: String = "belum"
+		if bool(t["completed"]):
+			st = "beres"
+		elif float(t["progress"]) > 0.001:
+			st = "jalan"
+		daftar.append({
+			"id": String(tid),
+			"nama": str(t["node"].title),
+			"ruang": str(t.get("ruang", "")),
+			"status": st,
+			"progres": float(t["progress"]),
+			"berdua": bool(t["requires_two"]) and _server_needed() > 1,
+		})
+	return daftar
+
+
+func get_info_pemain() -> Array:
+	# Untuk ID card: urut P1, P2.
+	var daftar: Array = []
+	for pid: int in _players.keys():
+		var p: Node = _players[pid]
+		var st: String = "aktif"
+		if p.is_downed:
+			st = "kurung"
+		elif p.is_hidden:
+			st = "sembunyi"
+		var kunci: String = ""
+		for kid: String in _key_carriers.keys():
+			if int(_key_carriers[kid]) == pid:
+				kunci = kid if kunci == "" else kunci + "," + kid
+		daftar.append({"nomor": int(p.player_index), "nama": "P%d" % p.player_index, "status": st,
+			"kunci": kunci, "item": bool(p.carrying_revive), "aman": is_pemain_aman(pid)})
+	daftar.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a["nomor"]) < int(b["nomor"]))
+	return daftar
+
+
+## Berdua = aman (versi sebagian): true kalau pemain ini dan temannya
+## sama-sama berdiri di alat tugas 2 pemain yang belum beres (Server, LAN,
+## Backup, Rapat). Dibaca enemy.gd (host) dan HUD (klip "BERDUA").
+## Mode solo / pemain sendirian = tidak pernah aman.
+func is_pemain_aman(peer_id: int) -> bool:
+	if _players.size() < 2 or not _players.has(peer_id):
+		return false
+	var p: Node = _players[peer_id]
+	if p.is_downed or p.is_hidden:
+		return false
+	for tid: StringName in _tasks.keys():
+		var t: Dictionary = _tasks[tid]
+		if not bool(t["requires_two"]) or bool(t["completed"]):
+			continue
+		var pos: Vector2 = (t["node"] as Node2D).global_position
+		var semua_di_sini: bool = true
+		for pid: int in _players.keys():
+			var q: Node = _players[pid]
+			if q.is_downed or q.is_hidden or (q as Node2D).global_position.distance_to(pos) > JARAK_TUGAS_BERDUA:
+				semua_di_sini = false
+				break
+		if semua_di_sini:
+			return true
+	return false
+
+
+## Untuk HUD (busur hijau): ke mana penanda Item Bangkit menunjuk bagi pemain
+## di PC ini. Teman dikurung & item belum diambil -> ke item; item sedang
+## dibawa pemain ini -> ke kurungan. Selain itu {"ada": false}.
+func get_tujuan_bangkit() -> Dictionary:
+	var pid: int = NetworkManager.local_peer_id()
+	var p: Node2D = get_local_player() as Node2D
+	if p == null or p.is_downed or _level_ended or _cage_peer == -1 or _cage_peer == pid:
+		return {"ada": false}
+	if _revive_carrier == pid and cage != null:
+		return {"ada": true, "pos": cage.global_position, "jenis": "kurungan"}
+	if _revive_visible and revive_item != null:
+		return {"ada": true, "pos": revive_item.global_position, "jenis": "item"}
+	return {"ada": false}
+
+
+# ------------------------------------------------- posisi aman (anti nyangkut)
+## true kalau badan pemain (bentuk collision di player.tscn) muat di posisi
+## ini tanpa menyentuh tembok / furnitur (collision layer 1). Musuh dan
+## pemain lain diabaikan. skala < 1 = cek bentuk yang diperkecil (dipakai
+## pengaman nyangkut, supaya menempel tembok biasa tidak dihitung).
+func bebas_tabrakan(pos: Vector2, skala: float = 1.0) -> bool:
+	var bentuk: Shape2D = null
+	var geser := Transform2D.IDENTITY
+	for pid: int in _players.keys():
+		var cs := (_players[pid] as Node).get_node_or_null("CollisionShape2D") as CollisionShape2D
+		if cs != null and cs.shape != null:
+			bentuk = cs.shape
+			geser = cs.transform
+			break
+	if bentuk == null:
+		var bulat := CircleShape2D.new()
+		bulat.radius = 6.0
+		bentuk = bulat
+		geser = Transform2D(0.0, Vector2(0, 3))
+	if not is_equal_approx(skala, 1.0):
+		bentuk = bentuk.duplicate()
+		if bentuk is CapsuleShape2D:
+			var kapsul := bentuk as CapsuleShape2D
+			kapsul.radius *= skala
+			kapsul.height *= skala
+		elif bentuk is CircleShape2D:
+			var bulat2 := bentuk as CircleShape2D
+			bulat2.radius *= skala
+		elif bentuk is RectangleShape2D:
+			var kotak := bentuk as RectangleShape2D
+			kotak.size *= skala
+	var q := PhysicsShapeQueryParameters2D.new()
+	q.shape = bentuk
+	q.transform = Transform2D(geser.get_rotation(), pos + geser.origin)
+	q.collision_mask = 1
+	q.collide_with_areas = false
+	var hasil: Array[Dictionary] = get_world_2d().direct_space_state.intersect_shape(q, 8)
+	for h: Dictionary in hasil:
+		var c: Object = h.get("collider")
+		if c is Node and ((c as Node).is_in_group("Enemy") or (c as Node).is_in_group("Player")):
+			continue
+		return false
+	return true
+
+
+## Posisi aman terdekat: pos itu sendiri kalau muat, kalau tidak tengah
+## sel lantai terdekat (±5 sel) yang muat.
+func posisi_aman(pos: Vector2) -> Vector2:
+	if bebas_tabrakan(pos):
+		return pos
+	if _pathfinder == null:
+		return pos
+	var sel: Vector2i = _pathfinder.world_to_cell(pos)
+	var terbaik: Vector2 = pos
+	var jarak_terbaik: float = INF
+	for dy: int in range(-5, 6):
+		for dx: int in range(-5, 6):
+			var c: Vector2i = sel + Vector2i(dx, dy)
+			if _pathfinder.is_cell_blocked(c):
+				continue
+			var titik: Vector2 = _pathfinder.cell_to_world(c)
+			var d: float = titik.distance_squared_to(pos)
+			if d < jarak_terbaik and bebas_tabrakan(titik):
+				jarak_terbaik = d
+				terbaik = titik
+	return terbaik

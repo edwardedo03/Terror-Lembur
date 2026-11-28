@@ -1,7 +1,8 @@
 extends Node
 ## MusicManager (Autoload) — backsound game dengan loop crossfade yang halus.
 ##
-## Main menu: Ghost Story. Level 1: The Leaves. Lagu diputar ulang BUKAN
+## Main menu: Ghost Story. Level 1: The House of Leaves. Level 2: Insistent
+## (yd, OpenGameArt, CC0; file .ogg). Lagu diputar ulang BUKAN
 ## dengan "putar dari 0" (itu menimbulkan jeda hening / bunyi klik di
 ## ujung MP3), tapi dengan crossfade: sesaat sebelum lagu habis, salinan
 ## kedua lagu itu mulai diputar dari awal dengan volume pelan, lalu
@@ -10,15 +11,20 @@ extends Node
 ## (menu -> level, level -> menu) juga crossfade, bukan putus lalu mulai.
 ##
 ## Musik itu lokal — tiap PC memutar sendiri, tidak lewat network,
-## jadi tidak ada RPC di sini. Dipanggil dari main_menu.gd (_ready)
-## dan level_1.gd (_ready); saat kembali ke menu, lagunya ikut
-## crossfade kembali ke lagu menu.
+## jadi tidak ada RPC di sini. Dipanggil dari _ready main_menu.gd,
+## pilih_level.gd, menunggu_host.gd (lagu menu), level_1.gd (play_level)
+## dan level_2.gd (play_level2); pindah layar = crossfade ke lagu berikutnya.
 
-const MENU_STREAM: AudioStreamMP3 = preload("res://assets/backsound/main_menu/Ghost20Story.mp3")
-const LEVEL_STREAM: AudioStreamMP3 = preload("res://assets/backsound/level_1/The20of20Leaves.mp3")
+# Tipe AudioStream (bukan AudioStreamMP3) supaya MP3 dan OGG sama-sama bisa.
+const MENU_STREAM: AudioStream = preload("res://assets/backsound/main_menu/Ghost20Story.mp3")
+const LEVEL_STREAM: AudioStream = preload("res://assets/backsound/level_1/The20of20Leaves.mp3")
+const LEVEL2_STREAM: AudioStream = preload("res://assets/backsound/level_2/Insistent.ogg")
 
 ## Volume musik. Ubah kalau terlalu pelan / keras (0 = paling keras).
 const MUSIC_VOLUME_DB: float = -12.0
+## Volume musik Level 2, sengaja lebih pelan: di lobi gelap musik cuma latar
+## tipis, supaya suasana tetap sunyi dan bunyi efek game tetap terdengar.
+const LEVEL2_VOLUME_DB: float = -17.0
 ## Lamanya crossfade (detik). Dipakai untuk loop maupun pindah lagu.
 const FADE_TIME: float = 2.5
 const SILENT_DB: float = -80.0
@@ -27,7 +33,7 @@ var _player_a: AudioStreamPlayer
 var _player_b: AudioStreamPlayer
 var _active: AudioStreamPlayer
 var _idle: AudioStreamPlayer
-var _current: AudioStreamMP3 = null
+var _current: AudioStream = null
 var _crossfading: bool = false
 var _fade_tween: Tween = null
 
@@ -65,9 +71,14 @@ func play_menu() -> void:
 	_play_track(MENU_STREAM)
 
 
-## Putar backsound Level 1 (The Leaves).
+## Putar backsound Level 1 (The House of Leaves).
 func play_level() -> void:
 	_play_track(LEVEL_STREAM)
+
+
+## Putar backsound Level 2 (Insistent), lebih pelan dari Level 1.
+func play_level2() -> void:
+	_play_track(LEVEL2_STREAM)
 
 
 ## Berhentikan semua musik (fade-out). Saat ini tidak dipanggil dari
@@ -83,7 +94,7 @@ func stop_music() -> void:
 			t.tween_callback(p.stop)
 
 
-func _play_track(stream: AudioStreamMP3) -> void:
+func _play_track(stream: AudioStream) -> void:
 	# Lagu yang sama sudah jalan: jangan mulai dari awal lagi.
 	if stream == _current and _active.playing:
 		return
@@ -94,12 +105,19 @@ func _play_track(stream: AudioStreamMP3) -> void:
 		_active.stream = stream
 		_active.volume_db = SILENT_DB
 		_active.play()
-		_fade_to(_active, MUSIC_VOLUME_DB)
+		_fade_to(_active, _volume_lagu(stream))
 		return
 	_crossfade_to(stream)
 
 
-func _crossfade_to(stream: AudioStreamMP3) -> void:
+## Volume tujuan tiap lagu (Level 2 lebih pelan).
+func _volume_lagu(stream: AudioStream) -> float:
+	if stream == LEVEL2_STREAM:
+		return LEVEL2_VOLUME_DB
+	return MUSIC_VOLUME_DB
+
+
+func _crossfade_to(stream: AudioStream) -> void:
 	_settle_crossfade()
 	_kill_fade_tween()
 	_crossfading = true
@@ -109,7 +127,7 @@ func _crossfade_to(stream: AudioStreamMP3) -> void:
 	_idle.play()
 	_fade_tween = create_tween().set_parallel(true)
 	_fade_tween.tween_property(_active, "volume_db", SILENT_DB, FADE_TIME)
-	_fade_tween.tween_property(_idle, "volume_db", MUSIC_VOLUME_DB, FADE_TIME)
+	_fade_tween.tween_property(_idle, "volume_db", _volume_lagu(stream), FADE_TIME)
 	_fade_tween.chain().tween_callback(_finish_crossfade)
 
 
@@ -131,7 +149,7 @@ func _settle_crossfade() -> void:
 		return
 	_kill_fade_tween()
 	_active.stop()
-	_idle.volume_db = MUSIC_VOLUME_DB
+	_idle.volume_db = _volume_lagu(_current)
 	var tmp: AudioStreamPlayer = _active
 	_active = _idle
 	_idle = tmp

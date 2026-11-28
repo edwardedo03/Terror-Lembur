@@ -6,6 +6,8 @@ extends CanvasLayer
 ## waktunya, status titik cas, titik kabel, jam & fase. Satpam dan Bos
 ## TIDAK ditampilkan. Saat komputer error, denah mati dan hanya muncul
 ## pesan kabel mana yang putus. Tutup dengan E atau Esc.
+## Nama ruangan di denah baru muncul setelah ruangan itu didatangi pemain
+## SATUNYA (bukan yang sedang duduk di komputer). Mode solo: pemain sendiri.
 
 var level: Node = null
 var font_mono: Font = null  # diisi level_2.gd (huruf mesin ketik)
@@ -85,7 +87,6 @@ class _Peta extends Control:
 
 	var layar: Node = null
 	var tex_denah: ImageTexture = null
-	var nama_ruang: Array = []  # [teks, posisi piksel dunia]
 	var ukuran_map: Vector2i = Vector2i(72, 46)
 	var _waktu: float = 0.0
 
@@ -106,13 +107,6 @@ class _Peta extends Control:
 				elif lantai != null and lantai.get_cell_source_id(c) != -1:
 					img.set_pixel(x, y, Color(0.04, 0.13, 0.16))
 		tex_denah = ImageTexture.create_from_image(img)
-		nama_ruang.clear()
-		var grup: Node = lv.get_node_or_null("NamaRuangan")
-		if grup != null:
-			for l: Node in grup.get_children():
-				if l is Label:
-					var lab: Label = l
-					nama_ruang.append([lab.text, lab.position + lab.size * 0.5])
 
 	func _process(delta: float) -> void:
 		_waktu += delta
@@ -148,10 +142,14 @@ class _Peta extends Control:
 		var skala: float = sel / 32.0
 		if tex_denah != null:
 			draw_texture_rect(tex_denah, Rect2(asal, Vector2(ukuran_map) * sel), false)
-		for r: Array in nama_ruang:
-			var pos_dunia: Vector2 = r[1]
-			var pos: Vector2 = asal + pos_dunia * skala
-			draw_string(font, pos + Vector2(-60, 0), str(r[0]), HORIZONTAL_ALIGNMENT_CENTER, 120, 10, Color(0.6, 0.85, 0.9, 0.7))
+		# nama ruangan: muncul kalau ruangan itu sudah didatangi pemain satunya
+		for r: Dictionary in lv.get_info_ruangan():
+			var k: Rect2i = r["kotak"]
+			var pos: Vector2 = asal + (Vector2(k.position) + Vector2(k.size) * 0.5) * sel
+			if bool(r["nama_ok"]):
+				draw_string(font, pos + Vector2(-70, 4), str(r["nama"]), HORIZONTAL_ALIGNMENT_CENTER, 140, 10, Color(0.6, 0.85, 0.9, 0.8))
+			else:
+				draw_string(font, pos + Vector2(-20, 4), "?", HORIZONTAL_ALIGNMENT_CENTER, 40, 12, Color(0.6, 0.85, 0.9, 0.3))
 		var kedip_cepat: bool = fmod(_waktu, 0.6) < 0.4
 		# komputer (lokasi operator)
 		var kp: Vector2 = lv.get_posisi_komputer()

@@ -4,27 +4,36 @@ extends CanvasLayer
 ## pesan tengah layar, panel hasil (ending + penilaian), dan panel putus koneksi.
 ## Gaya visual: UiTheme (kantor lembur: gelap hangat, garis rambut, mono,
 ## satu aksen amber).
+##
+## Penyesuaian supaya mirip HUD Level 2 (lihat scripts/hud_kantor.gd):
+## bar Tugas/Waktu, status, bar STAMINA, panduan, dan kotak prompt lama
+## diganti ID card, papan tugas dropdown (Tab), label Dymo, bar energi di
+## atas kepala, dan busur hijau Item Bangkit. Peta Gudang kini bergaya
+## denah evakuasi. Fungsi lama (update_tasks, set_stamina, dst.) tetap ada
+## supaya level_1.gd tidak perlu diubah banyak; isinya diabaikan kalau
+## elemen lamanya tidak dibangun.
+
+const HUD_KANTOR := preload("res://scripts/hud_kantor.gd")
 
 var _tasks_label: Label = null
 var _timer_label: Label = null
 var _status_label: Label = null
 var _prompt_label: Label = null
-var _message_label: Label = null
+var _pesan: GayaMenu.PesanTerminal = null  # pesan atas tengah bergaya terminal
+var _pesan_ketik: float = 0.0  # jumlah huruf yang sudah "diketik" (pecahan)
 var _flash_rect: ColorRect = null
-var _result_panel: CenterContainer = null
-var _result_dim: ColorRect = null
-var _result_title: Label = null
-var _result_stats: VBoxContainer = null
-var _stat_time: Label = null
-var _stat_deaths: Label = null
-var _stat_tasks: Label = null
-var _result_star_boxes: Array[UiTheme.StarIcon] = []
-var _result_star_count: Label = null
-var _disconnect_panel: CenterContainer = null
-var _disconnect_label: Label = null
+var _hasil: PanelHasil = null  # panel hasil akhir (scripts/panel_hasil.gd)
+var _putus: PanelPutus = null  # panel koneksi putus (scripts/panel_putus.gd)
 var _message_timer: float = 0.0
 var _flash_alpha: float = 0.0
 var _task_total: int = 0
+const PESAN_LAMA: float = 3.5  # detik pesan tampil
+const PESAN_PUDAR: float = 0.5  # detik memudar di ujung
+const PESAN_KETIK_PER_DETIK: float = 70.0
+const MERAH_PESAN := Color(0.886, 0.333, 0.247)  # #E2553F, sama dengan mockup
+const KATA_BAHAYA: Array[String] = ["padam", "sosok", "musuh", "berisik", "tertangkap", "terkunci", "perangkap", "mendekat"]
+var _kantor: CanvasLayer = null  # HUD gaya Level 2 (scripts/hud_kantor.gd)
+var _prompt_teks: String = ""  # teks arahan untuk label Dymo
 var _stamina_bar: ProgressBar = null
 var _stamina_fill: StyleBoxFlat = null
 
@@ -68,7 +77,7 @@ var _guide_open: bool = false
 const MAP_WORLD := Vector2(2048.0, 1280.0)
 const MAP_AREA := Vector2(760.0, 476.0)
 var _map_dim: ColorRect = null
-var _map_panel: CenterContainer = null
+var _map_panel: Control = null  # DenahKertas (hud_kantor.gd)
 var _map_area: Control = null
 var _map_rooms: Array = []
 var _map_available: bool = false
@@ -80,8 +89,12 @@ var _map_dot_friend: ColorRect = null
 
 func _ready() -> void:
 	layer = 10
-	_build_top_bar()
-	_build_stamina_bar()
+	# HUD gaya Level 2: ID card, papan tugas, label Dymo, bar energi, busur
+	# Item Bangkit. (Dulu: _build_top_bar, _build_stamina_bar, _build_guide.)
+	_kantor = HUD_KANTOR.new()
+	_kantor.name = "HudKantor"
+	_kantor.hud = self
+	add_child(_kantor)
 	_build_prompt_and_message()
 	_build_result_panel()
 	_build_disconnect_panel()
@@ -91,30 +104,22 @@ func _ready() -> void:
 	_flash_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_flash_rect)
 	_build_enemy_alert()
-	_build_guide()
 	_build_map()
-	# Flash dan alert harus di bawah panel hasil: pindahkan panel ke depan.
-	if _result_panel != null:
-		move_child(_result_panel, -1)
-	if _disconnect_panel != null:
-		move_child(_disconnect_panel, -1)
+	# Panel hasil (layer 25) dan panel koneksi putus (layer 26) punya
+	# CanvasLayer sendiri, jadi selalu di atas elemen HUD lain.
 
 
 func _process(delta: float) -> void:
-	if _message_timer > 0.0:
-		_message_timer -= delta
-		if _message_timer <= 0.0 and _message_label != null:
-			_message_label.text = ""
+	_update_pesan(delta)
 	if _flash_alpha > 0.0:
 		_flash_alpha = maxf(0.0, _flash_alpha - delta * 0.8)
 		_flash_rect.color = Color(0, 0, 0, _flash_alpha)
 	_update_enemy_alert(delta)
-	if _map_open:
-		_update_map_dots()
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
-	# TAB = panduan, M = peta (hanya kalau tersedia), ESC = tutup peta.
+	# TAB = papan tugas (+ panduan), M = peta (hanya kalau tersedia),
+	# ESC = tutup peta.
 	# Saat minigame terbuka semua tombol ini dimatikan: minigame punya
 	# input sendiri (termasuk ESC untuk batal), dan panduan/peta tidak
 	# boleh menumpuk di atasnya.
@@ -124,7 +129,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if _minigame_open():
 		return
 	if k.keycode == KEY_TAB:
-		toggle_guide()
+		if _kantor != null:
+			_kantor.toggle_papan()
 		get_viewport().set_input_as_handled()
 	elif k.keycode == KEY_M:
 		if _map_open:
@@ -182,6 +188,8 @@ func setup_map(rooms: Array) -> void:
 	# "rect": Rect2i} dalam SEL (32 px). Kotak digambar apa adanya:
 	# hanya ruangan, tanpa koridor dan tanpa props.
 	_map_rooms = rooms
+	if _map_panel != null:
+		_map_panel.set("rooms", rooms)
 	if _map_area == null:
 		return
 	for c: Node in _map_area.get_children():
@@ -234,6 +242,8 @@ func open_map() -> void:
 		_map_dim.visible = true
 	if _map_panel != null:
 		_map_panel.visible = true
+		if _map_panel.has_method("mulai"):
+			_map_panel.mulai()
 	_notify_map_open(true)
 
 
@@ -328,8 +338,14 @@ func update_status(lines: Array[String]) -> void:
 
 
 func show_prompt(text: String) -> void:
+	# Teks arahan sekarang tampil sebagai label Dymo (hud_kantor.gd).
+	_prompt_teks = text
 	if _prompt_label != null:
 		_prompt_label.text = text
+
+
+func get_prompt() -> String:
+	return _prompt_teks
 
 func set_stamina(ratio: float) -> void:
 	if _stamina_bar == null:
@@ -339,38 +355,52 @@ func set_stamina(ratio: float) -> void:
 		_stamina_fill.bg_color = UiTheme.RED if ratio < 0.25 else UiTheme.GREEN
 
 
-func _build_stamina_bar() -> void:
-	var label := _mk_label("STAMINA", 12, UiTheme.MUTED, Vector2.ZERO)
-	label.anchor_top = 1.0
-	label.anchor_bottom = 1.0
-	label.offset_left = 12
-	label.offset_right = 80
-	label.offset_top = -56
-	label.offset_bottom = -36
-	add_child(label)
-	_stamina_fill = UiTheme.bar_fill_style(UiTheme.GREEN)
-	var bg := UiTheme.bar_bg_style()
-	_stamina_bar = ProgressBar.new()
-	_stamina_bar.min_value = 0.0
-	_stamina_bar.max_value = 100.0
-	_stamina_bar.value = 100.0
-	_stamina_bar.show_percentage = false
-	_stamina_bar.add_theme_stylebox_override("background", bg)
-	_stamina_bar.add_theme_stylebox_override("fill", _stamina_fill)
-	_stamina_bar.anchor_top = 1.0
-	_stamina_bar.anchor_bottom = 1.0
-	_stamina_bar.offset_left = 84
-	_stamina_bar.offset_right = 284
-	_stamina_bar.offset_top = -54
-	_stamina_bar.offset_bottom = -34
-	_stamina_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(_stamina_bar)
-
+## Pesan atas tengah (gaya baris terminal, sama dengan intro):
+## teks diketik cepat, merah kalau berisi kata bahaya, amber kalau info
+## biasa, lalu memudar setelah PESAN_LAMA detik.
 func show_message(text: String) -> void:
-	if _message_label == null:
+	if _pesan == null:
 		return
-	_message_label.text = text
-	_message_timer = 3.5
+	_pesan.teks = _rapikan_pesan(text)
+	_pesan.warna = MERAH_PESAN if _pesan_bahaya(text) else GayaMenu.AMBER
+	_pesan_ketik = 0.0
+	_pesan.huruf = 0
+	_pesan.modulate.a = 1.0
+	_message_timer = PESAN_LAMA
+
+
+func _update_pesan(delta: float) -> void:
+	if _pesan == null or _message_timer <= 0.0:
+		return
+	if not _pesan.selesai_mengetik():
+		_pesan_ketik += delta * PESAN_KETIK_PER_DETIK
+		_pesan.huruf = int(_pesan_ketik)
+		if _pesan.selesai_mengetik():
+			_pesan.huruf = -1
+	_message_timer -= delta
+	_pesan.modulate.a = clampf(_message_timer / PESAN_PUDAR, 0.0, 1.0)
+	if _message_timer <= 0.0:
+		_pesan.teks = ""
+
+
+## Pesan bahaya (musuh, perangkap, lampu padam, tertangkap) tampil merah.
+static func _pesan_bahaya(text: String) -> bool:
+	var t: String = text.to_lower()
+	for kata: String in KATA_BAHAYA:
+		if t.contains(kata):
+			return true
+	return false
+
+
+## Rapikan teks pesan lama untuk baris terminal: tanpa titik tiga, tanpa
+## tanda pisah, tanpa titik penutup, huruf kapital semua.
+static func _rapikan_pesan(text: String) -> String:
+	var t: String = text.strip_edges()
+	t = t.replace(" — ", ", ").replace("—", ", ")
+	t = t.replace("... ", "  ").replace("...", "")
+	if t.ends_with("."):
+		t = t.substr(0, t.length() - 1)
+	return t.to_upper()
 
 
 func flash_blackout() -> void:
@@ -474,78 +504,43 @@ func _set_alert_alpha(rect: TextureRect, alpha: float) -> void:
 	rect.modulate = Color(1, 1, 1, clampf(alpha / ALERT_MAX_ALPHA, 0.0, 1.0))
 
 
-func show_result(success: bool, stars: int, ending: String, time_sec: float, deaths: int, done: int, total: int) -> void:
-	if _result_panel == null:
+func show_result(success: bool, stars: int, ending: String, time_sec: float, deaths: int, done: int, total: int, level_baru: String = "") -> void:
+	# level_baru: id level yang baru terbuka karena level ini pertama kali
+	# tamat ("level_2" saat Level 1 pertama tamat), "" kalau tidak ada.
+	if _hasil == null:
 		return
-	var m: int = int(time_sec) / 60
-	var s: int = int(time_sec) % 60
-	var title_color: Color = UiTheme.GREEN if success and ending == "Happy Ending" else (UiTheme.AMBER if success else UiTheme.RED)
-	_result_title.text = (ending if success else "GAGAL: KEDUA PEMAIN TERTANGKAP").to_upper()
-	_result_title.add_theme_color_override("font_color", title_color)
-	_stat_time.text = "%02d:%02d" % [m, s]
-	_stat_deaths.text = str(deaths)
-	_stat_tasks.text = "%d/%d" % [done, total]
-	for i in range(3):
-		_set_star_box(_result_star_boxes[i], i < stars)
-	_result_star_count.text = "%d/3" % stars
-	_result_dim.visible = true
-	_result_panel.visible = true
+	_hasil.tampilkan(success, stars, ending, time_sec, deaths, done, total, level_baru)
 
 
+## Tampilkan panel koneksi putus. jenis: "host_keluar", "host_putus",
+## atau "teman_putus" (lihat scripts/panel_putus.gd). detik = lama hitung
+## mundur ke menu utama (0 = tanpa hitung mundur).
+func show_putus(jenis: String, detik: float = 0.0) -> void:
+	if _putus == null:
+		return
+	# Panel hasil akan tertutup panel ini, jadi disembunyikan dulu,
+	# misalnya saat host keluar setelah level selesai.
+	if _hasil != null:
+		_hasil.sembunyikan()
+	_putus.tampilkan(jenis, detik)
+
+
+## Versi lama (teks bebas), tetap ada supaya pemanggil lama tidak rusak.
 func show_disconnect(text: String) -> void:
-	if _disconnect_panel == null:
-		return
-	_disconnect_label.text = text
-	_disconnect_panel.visible = true
+	var t: String = text.to_lower()
+	if t.contains("host keluar"):
+		show_putus("host_keluar", 4.0)
+	elif t.contains("host"):
+		show_putus("host_putus", 4.0)
+	else:
+		show_putus("teman_putus")
 
 
+## Dipanggil saat teman yang sempat terputus bergabung lagi (game lanjut).
 func hide_disconnect() -> void:
-	# Dipanggil saat partner yang sempat terputus bergabung lagi,
-	# supaya pesan "Partner terputus" hilang bersamaan dengan
-	# game yang dilanjutkan (lihat _on_peer_joined di level_1.gd).
-	if _disconnect_panel == null:
+	if _putus == null:
 		return
-	_disconnect_panel.visible = false
-
-
-func _build_guide() -> void:
-	# Dropdown kanan BAWAH, di atas tepi bawah layar. Tertutup secara
-	# default; dibuka dengan TAB atau klik header. Tinggi panel mengikuti
-	# isi lewat _fit_guide_panel (offset_bottom tetap, offset_top yang
-	# bergerak) supaya panel tumbuh ke ATAS saat dibuka.
-	_guide_panel = PanelContainer.new()
-	_guide_panel.add_theme_stylebox_override("panel", UiTheme.panel_style())
-	_guide_panel.anchor_left = 1.0
-	_guide_panel.anchor_right = 1.0
-	_guide_panel.anchor_top = 1.0
-	_guide_panel.anchor_bottom = 1.0
-	_guide_panel.offset_left = -380
-	_guide_panel.offset_right = -14
-	_guide_panel.offset_top = -70
-	_guide_panel.offset_bottom = -14
-	add_child(_guide_panel)
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 10)
-	margin.add_theme_constant_override("margin_right", 10)
-	margin.add_theme_constant_override("margin_top", 8)
-	margin.add_theme_constant_override("margin_bottom", 8)
-	_guide_panel.add_child(margin)
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 6)
-	margin.add_child(vbox)
-	_guide_header = Button.new()
-	_guide_header.text = "PANDUAN [TAB]"
-	_guide_header.custom_minimum_size = Vector2(340, 30)
-	_guide_header.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	UiTheme.style_button(_guide_header)
-	_guide_header.pressed.connect(_on_guide_header_pressed)
-	vbox.add_child(_guide_header)
-	_guide_body = VBoxContainer.new()
-	_guide_body.add_theme_constant_override("separation", 6)
-	_guide_body.visible = false
-	vbox.add_child(_guide_body)
-	set_guide_lines(GUIDE_LINES_L1)
-	_fit_guide_panel()
+	_putus.sembunyikan()
 
 
 func _fit_guide_panel() -> void:
@@ -559,268 +554,55 @@ func _fit_guide_panel() -> void:
 	_guide_panel.offset_top = _guide_panel.offset_bottom - h
 
 
-func _on_guide_header_pressed() -> void:
-	toggle_guide()
-
-
 func _build_map() -> void:
-	# Panel peta: layar gelap + panel tengah berisi kotak ruangan.
-	# Dibangun di sini (kode) supaya tidak ada file .tscn yang berubah.
-	_map_dim = ColorRect.new()
-	_map_dim.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_map_dim.color = UiTheme.DIM
-	_map_dim.visible = false
-	add_child(_map_dim)
-	_map_panel = CenterContainer.new()
-	_map_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_map_panel.visible = false
-	add_child(_map_panel)
-	var panel := PanelContainer.new()
-	panel.add_theme_stylebox_override("panel", UiTheme.panel_style())
-	_map_panel.add_child(panel)
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 24)
-	margin.add_theme_constant_override("margin_right", 24)
-	margin.add_theme_constant_override("margin_top", 18)
-	margin.add_theme_constant_override("margin_bottom", 18)
-	panel.add_child(margin)
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 8)
-	margin.add_child(vbox)
-	var title := UiTheme.mk_title("Peta Kantor", 28, UiTheme.INK)
-	vbox.add_child(title)
-	var sub := UiTheme.mk_label("Denah ruangan - hanya bisa dibuka di ruang Gudang", 13, UiTheme.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
-	vbox.add_child(sub)
-	_map_area = Control.new()
-	_map_area.custom_minimum_size = MAP_AREA
-	_map_area.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	vbox.add_child(_map_area)
-	_map_dot_self = ColorRect.new()
-	_map_dot_self.color = UiTheme.GREEN
-	_map_dot_self.size = Vector2(12, 12)
-	_map_dot_self.visible = false
-	_map_dot_self.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_map_area.add_child(_map_dot_self)
-	_map_dot_friend = ColorRect.new()
-	_map_dot_friend.color = UiTheme.AMBER
-	_map_dot_friend.size = Vector2(12, 12)
-	_map_dot_friend.visible = false
-	_map_dot_friend.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_map_area.add_child(_map_dot_friend)
-	var legend := HBoxContainer.new()
-	legend.alignment = BoxContainer.ALIGNMENT_CENTER
-	legend.add_theme_constant_override("separation", 6)
-	vbox.add_child(legend)
-	var dot_self := ColorRect.new()
-	dot_self.color = UiTheme.GREEN
-	dot_self.custom_minimum_size = Vector2(10, 10)
-	dot_self.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	legend.add_child(dot_self)
-	legend.add_child(UiTheme.mk_label("Kamu", 13, UiTheme.INK))
-	var dot_friend := ColorRect.new()
-	dot_friend.color = UiTheme.AMBER
-	dot_friend.custom_minimum_size = Vector2(10, 10)
-	dot_friend.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	legend.add_child(dot_friend)
-	legend.add_child(UiTheme.mk_label("Teman", 13, UiTheme.INK))
-	var hint := UiTheme.mk_label("M / ESC - Tutup peta", 13, UiTheme.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
-	vbox.add_child(hint)
-
-
-func _build_top_bar() -> void:
-	var panel := PanelContainer.new()
-	panel.add_theme_stylebox_override("panel", UiTheme.panel_style())
-	panel.position = Vector2(10, 10)
-	panel.size = Vector2(320, 62)
-	add_child(panel)
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 10)
-	margin.add_theme_constant_override("margin_right", 10)
-	margin.add_theme_constant_override("margin_top", 6)
-	margin.add_theme_constant_override("margin_bottom", 6)
-	panel.add_child(margin)
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 2)
-	margin.add_child(vbox)
-	_tasks_label = _mk_label("Tugas: 0/0", 16, UiTheme.INK, Vector2.ZERO)
-	vbox.add_child(_tasks_label)
-	_timer_label = _mk_label("Waktu: 00:00", 16, UiTheme.AMBER, Vector2.ZERO)
-	vbox.add_child(_timer_label)
-	_status_label = _mk_label("", 14, UiTheme.INK, Vector2.ZERO)
-	_status_label.anchor_left = 1.0
-	_status_label.anchor_right = 1.0
-	_status_label.offset_left = -320
-	_status_label.offset_right = -14
-	_status_label.offset_top = 12
-	_status_label.offset_bottom = 60
-	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	add_child(_status_label)
-	var hint := _mk_label("WASD/Panah: Gerak  |  Shift: Lari (berisik!)  |  E: Interaksi  |  Esc: Batalkan tugas  |  TAB: Panduan", 12, UiTheme.MUTED, Vector2.ZERO)
-	hint.anchor_top = 1.0
-	hint.anchor_bottom = 1.0
-	hint.offset_left = 12
-	hint.offset_right = 880
-	hint.offset_top = -26
-	hint.offset_bottom = -6
-	add_child(hint)
+	# Peta Gudang bergaya denah evakuasi (sama dengan denah Level 2),
+	# digambar dari kode di hud_kantor.gd -> DenahKertas. Aturannya tetap:
+	# semua ruangan terlihat, hanya bisa dibuka di Gudang, ada titik teman.
+	var kertas := HUD_KANTOR.DenahKertas.new()
+	kertas.name = "DenahKertas"
+	kertas.font = HUD_KANTOR.F_MONO_TEBAL
+	kertas.font_tipis = HUD_KANTOR.F_MONO
+	kertas.set_anchors_preset(Control.PRESET_FULL_RECT)
+	kertas.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	kertas.visible = false
+	add_child(kertas)
+	_map_panel = kertas
 
 
 func _build_prompt_and_message() -> void:
-	var prompt_panel := PanelContainer.new()
-	prompt_panel.add_theme_stylebox_override("panel", UiTheme.panel_style())
-	prompt_panel.anchor_left = 0.5
-	prompt_panel.anchor_right = 0.5
-	prompt_panel.anchor_top = 1.0
-	prompt_panel.anchor_bottom = 1.0
-	prompt_panel.offset_left = -320
-	prompt_panel.offset_right = 320
-	prompt_panel.offset_top = -58
-	prompt_panel.offset_bottom = -30
-	add_child(prompt_panel)
-	var prompt_center := CenterContainer.new()
-	prompt_panel.add_child(prompt_center)
-	_prompt_label = _mk_label("", 16, UiTheme.INK, Vector2.ZERO)
-	_prompt_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_prompt_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	prompt_center.add_child(_prompt_label)
-	_message_label = _mk_label("", 17, UiTheme.AMBER, Vector2.ZERO)
-	_message_label.anchor_left = 0.5
-	_message_label.anchor_right = 0.5
-	_message_label.offset_left = -400
-	_message_label.offset_right = 400
-	_message_label.offset_top = 78
-	_message_label.offset_bottom = 104
-	_message_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	add_child(_message_label)
+	# Kotak prompt lama di bawah tengah diganti label Dymo (hud_kantor.gd);
+	# yang dibangun di sini tinggal pesan atas tengah: baris terminal
+	# "> TEKS" + kursor (GayaMenu.PesanTerminal), lebarnya mengikuti teks.
+	_pesan = GayaMenu.PesanTerminal.new()
+	_pesan.name = "PesanTerminal"
+	_pesan.anchor_left = 0.5
+	_pesan.anchor_right = 0.5
+	_pesan.offset_left = -560
+	_pesan.offset_right = 560
+	_pesan.offset_top = 64
+	_pesan.offset_bottom = 100
+	_pesan.ukuran = 17
+	add_child(_pesan)
 
 
 func _build_result_panel() -> void:
-	_result_dim = ColorRect.new()
-	_result_dim.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_result_dim.color = UiTheme.DIM
-	_result_dim.visible = false
-	_result_dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(_result_dim)
-	_result_panel = CenterContainer.new()
-	_result_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_result_panel.visible = false
-	add_child(_result_panel)
-	var panel := PanelContainer.new()
-	panel.add_theme_stylebox_override("panel", UiTheme.panel_style())
-	panel.custom_minimum_size = Vector2(640, 0)
-	_result_panel.add_child(panel)
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 32)
-	margin.add_theme_constant_override("margin_right", 32)
-	margin.add_theme_constant_override("margin_top", 26)
-	margin.add_theme_constant_override("margin_bottom", 26)
-	panel.add_child(margin)
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 0)
-	margin.add_child(vbox)
-	_result_title = UiTheme.mk_title("", 40, UiTheme.INK)
-	vbox.add_child(_result_title)
-	vbox.add_child(_spacer(14))
-	vbox.add_child(UiTheme.hairline())
-	vbox.add_child(_spacer(12))
-	_result_stats = VBoxContainer.new()
-	_result_stats.add_theme_constant_override("separation", 8)
-	vbox.add_child(_result_stats)
-	_stat_time = _stat_row("WAKTU")
-	_stat_deaths = _stat_row("TERTANGKAP")
-	_stat_tasks = _stat_row("TUGAS")
-	vbox.add_child(_spacer(12))
-	vbox.add_child(UiTheme.hairline())
-	vbox.add_child(_spacer(12))
-	var rate_row := HBoxContainer.new()
-	rate_row.add_theme_constant_override("separation", 10)
-	vbox.add_child(rate_row)
-	var rate_label := UiTheme.mk_label("PENILAIAN", 14, UiTheme.MUTED)
-	rate_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	rate_row.add_child(rate_label)
-	_result_star_boxes.clear()
-	for i in range(3):
-		var star := UiTheme.StarIcon.new()
-		star.custom_minimum_size = Vector2(20, 20)
-		star.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		rate_row.add_child(star)
-		_result_star_boxes.append(star)
-	_result_star_count = UiTheme.mk_label("0/3", 16, UiTheme.INK)
-	_result_star_count.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	rate_row.add_child(_result_star_count)
-	vbox.add_child(_spacer(22))
-	var hbox := HBoxContainer.new()
-	hbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	hbox.add_theme_constant_override("separation", 12)
-	vbox.add_child(hbox)
-	var retry := Button.new()
-	retry.text = "MAIN LAGI"
-	retry.custom_minimum_size = Vector2(160, 44)
-	UiTheme.style_button(retry)
-	retry.pressed.connect(_on_retry_pressed)
-	hbox.add_child(retry)
-	var menu := Button.new()
-	menu.text = "MENU UTAMA"
-	menu.custom_minimum_size = Vector2(160, 44)
-	UiTheme.style_button(menu)
-	menu.pressed.connect(_on_menu_pressed)
-	hbox.add_child(menu)
+	# Panel hasil sama untuk Level 1 dan Level 2 (scripts/panel_hasil.gd):
+	# MAIN LAGI, PILIH LEVEL (host), MENU UTAMA, plus cap "LEVEL 2 TERBUKA".
+	_hasil = PanelHasil.new()
+	_hasil.name = "PanelHasil"
+	_hasil.main_lagi.connect(_on_retry_pressed)
+	_hasil.pilih_level.connect(_on_pilih_level_pressed)
+	_hasil.menu_utama.connect(_on_menu_pressed)
+	_hasil.atur_level("LEVEL 1  LANTAI KANTOR")
+	add_child(_hasil)
 
 
 func _build_disconnect_panel() -> void:
-	_disconnect_panel = CenterContainer.new()
-	_disconnect_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_disconnect_panel.visible = false
-	add_child(_disconnect_panel)
-	var panel := PanelContainer.new()
-	panel.add_theme_stylebox_override("panel", UiTheme.panel_style())
-	panel.custom_minimum_size = Vector2(480, 0)
-	_disconnect_panel.add_child(panel)
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 28)
-	margin.add_theme_constant_override("margin_right", 28)
-	margin.add_theme_constant_override("margin_top", 22)
-	margin.add_theme_constant_override("margin_bottom", 22)
-	panel.add_child(margin)
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 16)
-	margin.add_child(vbox)
-	_disconnect_label = UiTheme.mk_label("", 16, UiTheme.INK, null, HORIZONTAL_ALIGNMENT_CENTER)
-	_disconnect_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	vbox.add_child(_disconnect_label)
-	var hbox := HBoxContainer.new()
-	hbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	vbox.add_child(hbox)
-	var menu := Button.new()
-	menu.text = "MENU UTAMA"
-	menu.custom_minimum_size = Vector2(160, 44)
-	UiTheme.style_button(menu)
-	menu.pressed.connect(_on_menu_pressed)
-	hbox.add_child(menu)
-
-
-func _spacer(h: int) -> Control:
-	var c := Control.new()
-	c.custom_minimum_size = Vector2(0, h)
-	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	return c
-
-
-func _stat_row(label_text: String) -> Label:
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 8)
-	var lab := UiTheme.mk_label(label_text, 14, UiTheme.MUTED)
-	lab.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	row.add_child(lab)
-	var val := UiTheme.mk_label("", 16, UiTheme.INK, null, HORIZONTAL_ALIGNMENT_RIGHT)
-	val.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(val)
-	_result_stats.add_child(row)
-	return val
-
-
-func _set_star_box(box: UiTheme.StarIcon, filled: bool) -> void:
-	box.filled = filled
+	# Panel koneksi putus sama untuk Level 1 dan Level 2 (scripts/panel_putus.gd).
+	_putus = PanelPutus.new()
+	_putus.name = "PanelPutus"
+	_putus.menu_utama.connect(_on_menu_pressed)
+	add_child(_putus)
 
 
 func _mk_label(text: String, font_size: int, color: Color, pos: Vector2) -> Label:
@@ -843,10 +625,15 @@ func _on_retry_pressed() -> void:
 		lv.request_restart()
 
 
+func _on_pilih_level_pressed() -> void:
+	var lv: Node = _level()
+	if lv != null and lv.has_method("request_pilih_level"):
+		lv.request_pilih_level()
+
+
 func _on_menu_pressed() -> void:
 	var lv: Node = _level()
 	if lv != null:
 		lv.request_menu()
 	else:
-		NetworkManager.disconnect_all()
-		get_tree().change_scene_to_file("res://scenes/main_menu.tscn")
+		AlurLevel.ke_menu_utama()

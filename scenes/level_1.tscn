@@ -10,7 +10,6 @@
 [ext_resource type="PackedScene" path="res://scenes/hud.tscn" id="ps_hud"]
 [ext_resource type="PackedScene" path="res://scenes/revive_item.tscn" id="ps_rev"]
 [ext_resource type="PackedScene" path="res://scenes/task_station.tscn" id="ps_task"]
-[ext_resource type="SpriteFrames" uid="uid://d0nytfq8sft64" path="res://assets/characters/office_worker/office_worker.tres" id="sf_worker"]
 [ext_resource type="Script" uid="uid://brrcv8u36u2qf" path="res://scripts/level_1.gd" id="s_level"]
 [ext_resource type="Texture2D" uid="uid://bhiuqieli5a3t" path="res://assets/sprites/light_soft.png" id="tx_light"]
 [ext_resource type="TileSet" uid="uid://diw4getdnb1cy" path="res://assets/tiles/lembur/tileset_lembur.tres" id="t_set"]
@@ -768,26 +767,6 @@ position = Vector2(656, 656)
 [node name="Enemy" parent="." unique_id=1451399148 instance=ExtResource("ps_enemy")]
 visible = false
 position = Vector2(144, 272)
-
-[node name="AnimatedSprite2D2" type="AnimatedSprite2D" parent="Enemy" unique_id=31849737]
-position = Vector2(0, -4)
-sprite_frames = ExtResource("sf_worker")
-animation = &"idle_down"
-autoplay = "idle_down"
-
-[node name="StateLabel2" type="Label" parent="Enemy" unique_id=1758105830]
-offset_left = -10.0
-offset_top = -38.0
-offset_right = 10.0
-offset_bottom = -22.0
-text = "?"
-horizontal_alignment = 1
-
-[node name="Glow2" type="PointLight2D" parent="Enemy" unique_id=875444633]
-color = Color(1, 0.25, 0.25, 1)
-energy = 0.55
-texture = ExtResource("tx_light")
-texture_scale = 0.7
 
 [node name="HUD" parent="." unique_id=381254606 instance=ExtResource("ps_hud")]
 

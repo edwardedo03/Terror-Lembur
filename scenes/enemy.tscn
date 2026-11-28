@@ -1,7 +1,7 @@
 [gd_scene format=3 uid="uid://do1jm7gsv2kvb"]
 
 [ext_resource type="Script" uid="uid://iaaonep61sdo" path="res://scripts/enemy.gd" id="1"]
-[ext_resource type="SpriteFrames" uid="uid://d0nytfq8sft64" path="res://assets/characters/office_worker/office_worker.tres" id="2"]
+[ext_resource type="SpriteFrames" uid="uid://bacab0lnno6my" path="res://assets/characters/satpam/satpam_frames.tres" id="2"]
 [ext_resource type="Texture2D" uid="uid://bhiuqieli5a3t" path="res://assets/sprites/light_soft.png" id="3"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_go7sj"]
@@ -19,12 +19,13 @@ position = Vector2(0, -4)
 sprite_frames = ExtResource("2")
 animation = &"idle_down"
 autoplay = "idle_down"
+offset = Vector2(0, -16)
 
 [node name="StateLabel" type="Label" parent="." unique_id=1766639906]
 offset_left = -10.0
-offset_top = -38.0
+offset_top = -56.0
 offset_right = 10.0
-offset_bottom = -22.0
+offset_bottom = -40.0
 text = "?"
 horizontal_alignment = 1
 

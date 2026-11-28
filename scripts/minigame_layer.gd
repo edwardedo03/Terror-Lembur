@@ -44,6 +44,11 @@ var _status_label: Label = null
 var _status_square: ColorRect = null
 var _progress_bar: ProgressBar = null
 var _pct_label: Label = null
+# Dipakai gaya monitor (pakai_gaya_monitor, sama dengan popup Level 2).
+var _panel: PanelContainer = null
+var _margin: MarginContainer = null
+var _hint_row: HBoxContainer = null
+var _gaya_monitor: bool = false
 
 
 func _ready() -> void:
@@ -83,7 +88,7 @@ func open_minigame(task_id: StringName, game_type: StringName, shared: bool = fa
 	_game_holder.add_child(_game)
 	_game.is_mirror = shared
 	_game.setup()
-	_title_label.text = _game.game_title.to_upper()
+	_title_label.text = _game.game_title if _gaya_monitor else _game.game_title.to_upper()
 	_instructions_label.text = _game.instructions
 	_status_label.text = ""
 	_progress_bar.value = 0.0
@@ -257,12 +262,14 @@ func _build_ui() -> void:
 	panel.add_theme_stylebox_override("panel", UiTheme.panel_style())
 	panel.custom_minimum_size = Vector2(640, 470)
 	center.add_child(panel)
+	_panel = panel
 	var margin := MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", 24)
 	margin.add_theme_constant_override("margin_right", 24)
 	margin.add_theme_constant_override("margin_top", 18)
 	margin.add_theme_constant_override("margin_bottom", 18)
 	panel.add_child(margin)
+	_margin = margin
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 10)
 	margin.add_child(vbox)
@@ -308,8 +315,130 @@ func _build_ui() -> void:
 	var brow := HBoxContainer.new()
 	brow.add_theme_constant_override("separation", 8)
 	vbox.add_child(brow)
+	_hint_row = brow
 	var hint_left := UiTheme.mk_label("ESC: BATALKAN TUGAS, PROGRES HILANG", 12, UiTheme.MUTED)
 	brow.add_child(hint_left)
 	var hint_right := UiTheme.mk_label("MUSUH TETAP BERGERAK", 12, UiTheme.MUTED, null, HORIZONTAL_ALIGNMENT_RIGHT)
 	hint_right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	brow.add_child(hint_right)
+
+
+# ------------------------------------------------------------------
+# Gaya "monitor" — sama dengan popup tugas Level 2 (bingkai monitor, layar
+# gelap bergaris, teks hijau fosfor, bar progres blok). Dipanggil
+# level_1.gd dengan pelat "PC LEMBUR · LT. 1". Isi minigame tidak diubah;
+# yang berubah hanya bingkai, huruf, dan warna teks.
+func pakai_gaya_monitor(f_biasa: Font, f_tebal: Font, teks_pelat: String) -> void:
+	if _gaya_monitor or _panel == null:
+		return
+	_gaya_monitor = true
+	var bezel := StyleBoxFlat.new()
+	bezel.bg_color = Color(0.18, 0.18, 0.2)
+	bezel.border_color = Color(0.31, 0.31, 0.35)
+	bezel.set_border_width_all(2)
+	bezel.set_corner_radius_all(18)
+	bezel.content_margin_left = 22
+	bezel.content_margin_right = 22
+	bezel.content_margin_top = 20
+	bezel.content_margin_bottom = 46
+	bezel.shadow_color = Color(0, 0, 0, 0.55)
+	bezel.shadow_size = 14
+	bezel.anti_aliasing = true
+	_panel.add_theme_stylebox_override("panel", bezel)
+	# layar gelap di dalam bingkai
+	var layar := PanelContainer.new()
+	layar.name = "LayarMonitor"
+	var gaya_layar := StyleBoxFlat.new()
+	gaya_layar.bg_color = Color(0.04, 0.055, 0.063)
+	gaya_layar.set_corner_radius_all(12)
+	gaya_layar.content_margin_left = 18
+	gaya_layar.content_margin_right = 18
+	gaya_layar.content_margin_top = 14
+	gaya_layar.content_margin_bottom = 12
+	gaya_layar.anti_aliasing = true
+	layar.add_theme_stylebox_override("panel", gaya_layar)
+	_panel.remove_child(_margin)
+	_panel.add_child(layar)
+	layar.add_child(_margin)
+	for sisi: String in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
+		_margin.add_theme_constant_override(sisi, 0)
+	var garis := _Scanline.new()
+	garis.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layar.add_child(garis)
+	# teks: huruf mesin ketik, warna fosfor
+	var hijau := Color(0.78, 0.91, 0.77)
+	var hijau_redup := Color(0.45, 0.56, 0.44)
+	_title_label.add_theme_font_override("font", f_tebal)
+	_title_label.add_theme_font_size_override("font_size", 22)
+	_title_label.add_theme_color_override("font_color", hijau)
+	_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_instructions_label.add_theme_font_override("font", f_biasa)
+	_instructions_label.add_theme_font_size_override("font_size", 14)
+	_instructions_label.add_theme_color_override("font_color", hijau_redup)
+	_status_label.add_theme_font_override("font", f_tebal)
+	_pct_label.add_theme_font_override("font", f_tebal)
+	_pct_label.add_theme_color_override("font_color", hijau_redup)
+	# progres = deretan blok segmen
+	var latar_bar := StyleBoxFlat.new()
+	latar_bar.bg_color = Color(0.16, 0.2, 0.18)
+	var isi_bar := StyleBoxFlat.new()
+	isi_bar.bg_color = Color(1.0, 0.69, 0.27)
+	_progress_bar.add_theme_stylebox_override("background", latar_bar)
+	_progress_bar.add_theme_stylebox_override("fill", isi_bar)
+	_progress_bar.custom_minimum_size = Vector2(0, 12)
+	var segmen := _SegmenProgres.new()
+	segmen.set_anchors_preset(Control.PRESET_FULL_RECT)
+	segmen.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_progress_bar.add_child(segmen)
+	# baris petunjuk Esc diganti label Dymo "ESC = BATAL" di bingkai bawah
+	if _hint_row != null:
+		_hint_row.visible = false
+	var pelat := _Pelat.new()
+	pelat.panel = _panel
+	pelat.f_tebal = f_tebal
+	pelat.teks_pelat = teks_pelat
+	pelat.set_anchors_preset(Control.PRESET_FULL_RECT)
+	pelat.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_root.add_child(pelat)
+
+
+class _Scanline extends Control:
+	func _draw() -> void:
+		var y: float = 0.0
+		while y < size.y:
+			draw_line(Vector2(0, y), Vector2(size.x, y), Color(0, 0, 0, 0.16), 1.0)
+			y += 3.0
+
+
+class _SegmenProgres extends Control:
+	func _draw() -> void:
+		var langkah: float = size.x / 16.0
+		for k: int in range(1, 16):
+			draw_rect(Rect2(k * langkah - 2.0, 0, 4.0, size.y), Color(0.04, 0.055, 0.063))
+
+
+class _Pelat extends Control:
+	# Pelat merek, lampu power & label Dymo "ESC = BATAL" di bingkai bawah.
+	var panel: Control = null
+	var f_tebal: Font = null
+	var teks_pelat: String = ""
+
+	func _process(_delta: float) -> void:
+		if is_visible_in_tree():
+			queue_redraw()
+
+	func _draw() -> void:
+		if panel == null or f_tebal == null:
+			return
+		var r: Rect2 = panel.get_global_rect()
+		r.position -= get_global_rect().position
+		var y: float = r.end.y - 23.0
+		draw_string(f_tebal, Vector2(r.position.x + 28, y + 4), teks_pelat, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.6, 0.6, 0.63))
+		draw_circle(Vector2(r.end.x - 30, y), 4.0, Color(0.43, 0.9, 0.47))
+		var teks: String = "ESC = BATAL"
+		var lebar: float = f_tebal.get_string_size(teks, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 30.0
+		var x: float = r.end.x - 60.0 - lebar
+		var pita := PackedVector2Array([Vector2(x + 5, y - 12), Vector2(x + lebar - 5, y - 12), Vector2(x + lebar, y),
+			Vector2(x + lebar - 5, y + 12), Vector2(x + 5, y + 12), Vector2(x, y)])
+		draw_colored_polygon(pita, Color(0.086, 0.086, 0.1))
+		draw_string(f_tebal, Vector2(x + 15, y + 5), teks, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.93, 0.93, 0.94))

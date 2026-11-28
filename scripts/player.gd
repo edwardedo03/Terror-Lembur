@@ -30,6 +30,8 @@ var map_open: bool = false  # peta kantor sedang dibuka (level membekukan gerak)
 var stamina: float = STAMINA_MAX
 var _sprint_locked: bool = false
 var _regen_delay: float = 0.0
+var _cek_nyangkut_timer: float = 0.0
+var _nyangkut_berapa: int = 0
 
 var _sync_timer: float = 0.0
 var _target_pos: Vector2 = Vector2.ZERO
@@ -47,9 +49,16 @@ var _base_tint: Color = Color.WHITE
 var _facing: String = "down"
 
 
+## Lama host mengabaikan paket posisi dari teman setelah pemain di-spawn
+## (milidetik). Lihat _sync_state.
+const ABAIKAN_SYNC_AWAL_MS: int = 1500
+var _lahir_ms: int = 0
+
+
 func _ready() -> void:
 	add_to_group("Player")
 	peer_id = get_multiplayer_authority()
+	_lahir_ms = Time.get_ticks_msec()
 	_base_collision_mask = collision_mask
 	_update_ghost_collision()
 	if player_index == 2:
@@ -125,7 +134,31 @@ func _physics_process(delta: float) -> void:
 	var speed: float = SPRINT_SPEED if is_sprinting else WALK_SPEED
 	velocity = dir.normalized() * speed if dir.length() > 0.1 else Vector2.ZERO
 	move_and_slide()
+	_cek_nyangkut(delta, level)
 	_sync_tick(delta)
+
+
+# Anti nyangkut (sama dengan Level 2): tiap 0,2 detik dicek apakah badan
+# pemain masuk ke tembok / furnitur (pakai bentuk collision yang sedikit
+# diperkecil, jadi menempel tembok biasa TIDAK dihitung). Kalau 2x
+# berturut-turut masuk, pemain dipindah ke lantai kosong terdekat.
+func _cek_nyangkut(delta: float, level: Node) -> void:
+	if level == null or not level.has_method("bebas_tabrakan"):
+		return
+	_cek_nyangkut_timer -= delta
+	if _cek_nyangkut_timer > 0.0:
+		return
+	_cek_nyangkut_timer = 0.2
+	if level.bebas_tabrakan(global_position, 0.6):
+		_nyangkut_berapa = 0
+		return
+	_nyangkut_berapa += 1
+	if _nyangkut_berapa >= 2:
+		_nyangkut_berapa = 0
+		var tujuan: Vector2 = level.posisi_aman(global_position)
+		print("[Level 1] P%d nyangkut di %s -> dipindah ke %s" % [player_index, str(global_position), str(tujuan)])
+		global_position = tujuan
+		velocity = Vector2.ZERO
 
 
 func _process(delta: float) -> void:
@@ -232,12 +265,26 @@ func _sync_tick(delta: float) -> void:
 
 @rpc("any_peer", "call_remote", "unreliable")
 func _sync_state(pos: Vector2, vel: Vector2, hidden: bool, downed: bool, carrying: bool, sprinting: bool, has_iframes: bool) -> void:
+	# Setelah MAIN LAGI, PC teman masih sempat mengirim posisi dari level
+	# yang lama sebelum ikut memuat ulang. Paket basi itu dulu memindahkan
+	# pemain teman di level baru milik host ke tempat lamanya, lalu ikut
+	# terkirim balik ke teman lewat sinkron awal, sehingga teman muncul di
+	# tempat lain, bukan di titik spawn. Jadi host mengabaikan paket posisi
+	# dari teman sebentar setelah pemain itu di-spawn.
+	if NetworkManager.is_server_authority() and Time.get_ticks_msec() - _lahir_ms < ABAIKAN_SYNC_AWAL_MS:
+		return
 	_target_pos = pos
 	_has_target = true
 	velocity = vel
-	is_hidden = hidden
-	is_downed = downed
-	carrying_revive = carrying
+	# Sembunyi / tertangkap / bawa item diputuskan HOST (lewat apply_net_state
+	# yang reliable). Paket posisi dari client ini unreliable dan bisa datang
+	# telat membawa nilai lama -> dulu bisa menimpa keputusan host sesaat
+	# (mis. baru disembunyikan host, lalu tertimpa "tidak sembunyi" dan
+	# langsung tertangkap). Jadi di host ketiga nilai itu diabaikan.
+	if not NetworkManager.is_server_authority():
+		is_hidden = hidden
+		is_downed = downed
+		carrying_revive = carrying
 	is_sprinting = sprinting
 	_update_ghost_collision()
 	if has_iframes and iframes_left <= 0.0:

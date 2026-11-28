@@ -23,6 +23,9 @@ const BLINK_MIN: float = 16.0
 const BLINK_MAX: float = 26.0
 const BLIND_TIME: float = 2.5
 const SYNC_INTERVAL: float = 0.05
+# Disamakan dengan Satpam Level 2:
+const JARAK_LANGSUNG: float = 80.0  # ±2,5 tile: target sedekat ini & terlihat -> kejar lurus (bukan lewat grid)
+const JARAK_SEGAN: float = 150.0  # ±4,7 tile: dari jarak ini musuh berbalik menjauhi pemain yang aman berdua
 
 var state: int = State.PATROL
 var pathfinder: GridPathfinder = null
@@ -53,7 +56,10 @@ var _has_target: bool = false
 var _bob_time: float = 0.0
 var _last_anim_pos: Vector2 = Vector2.ZERO
 var _facing: String = "down"
-var _base_tint: Color = Color(0.45, 0.42, 0.55)
+var _base_tint: Color = Color.WHITE  # sprite Manager (sama dengan Satpam Level 2) tampil apa adanya
+var _segan_timer: float = 0.0
+var _jeda_langsung: float = 0.0  # >0 = sementara kejar lewat grid saja (habis nyangkut di sudut)
+var _langsung_diam: float = 0.0
 
 @onready var sprite: AnimatedSprite2D = $AnimatedSprite2D
 @onready var state_label: Label = $StateLabel
@@ -254,6 +260,31 @@ func _patrol_tick(delta: float) -> void:
 
 func _chase_tick(delta: float) -> void:
 	_repath_timer -= delta
+	# Dari dekat: kejar lurus ke pemain yang TERLIHAT (sama dengan Level 2).
+	# Jalur grid berhenti di tengah sel lantai terdekat, padahal pemain bisa
+	# berdiri di sela-sela furnitur (lebih dari jarak tangkap dari tengah
+	# sel) -> dulu pemain di sela furnitur tidak bisa ditangkap.
+	_jeda_langsung = maxf(0.0, _jeda_langsung - delta)
+	if not _lure_active and _target != null and is_instance_valid(_target) and _jeda_langsung <= 0.0 \
+			and not _target.is_hidden and not _target.is_downed and not _aman(_target):
+		var ke_target: Vector2 = _target.global_position - global_position
+		if ke_target.length() <= JARAK_LANGSUNG and _has_line_of_sight(_target):
+			_last_known = _target.global_position
+			_path = PackedVector2Array()
+			_repath_timer = 0.0
+			var sebelum: Vector2 = global_position
+			velocity = ke_target.normalized() * CHASE_SPEED
+			move_and_slide()
+			# Nyangkut di sudut furnitur saat kejar lurus -> 1 detik lewat
+			# jalur grid dulu supaya bisa memutar.
+			if global_position.distance_to(sebelum) < CHASE_SPEED * delta * 0.25:
+				_langsung_diam += delta
+				if _langsung_diam > 0.5:
+					_langsung_diam = 0.0
+					_jeda_langsung = 1.0
+			else:
+				_langsung_diam = 0.0
+			return
 	if _target != null and is_instance_valid(_target):
 		# Sengaja TIDAK menulis _last_known dari posisi live pemain:
 		# musuh hanya boleh mengejar posisi terakhir yang TERLIHAT.
@@ -306,7 +337,14 @@ func _request_path(dest: Vector2) -> void:
 	_path_index = 0
 
 
+func _aman(p: Node) -> bool:
+	# Berdua di tugas 2 pemain = aman (level_1.gd -> is_pemain_aman).
+	var level: Node = get_tree().get_first_node_in_group("LevelManager")
+	return level != null and level.has_method("is_pemain_aman") and level.is_pemain_aman(int(p.peer_id))
+
+
 func _update_perception(step: float) -> void:
+	_segan_timer = maxf(0.0, _segan_timer - step)
 	if state == State.BLIND or state == State.VANISH or state == State.STUNNED:
 		return
 	# Begitu pemain sembunyi/terkurung, musuh langsung "kehilangan" dia:
@@ -325,6 +363,19 @@ func _update_perception(step: float) -> void:
 		if not (p is Node2D):
 			continue
 		if p.is_downed:
+			continue
+		if _aman(p):
+			# Berdua di tugas 2 pemain = tidak dikejar (sama dengan Level 2).
+			# Kalau sudah dekat, musuh "segan" dan kembali patroli menjauh.
+			if p == _target:
+				_target = null
+				_suspicion = 0.0
+				_lose_timer = 0.0
+				if state == State.CHASE or state == State.SEARCH:
+					_set_state(State.PATROL)
+			if global_position.distance_to(p.global_position) <= JARAK_SEGAN and _segan_timer <= 0.0:
+				_segan_timer = 2.0
+				_menjauh_dari(p.global_position)
 			continue
 		# Sembunyi = tidak terdeteksi SAMA SEKALI. Dulu ada pengecualian
 		# 42px (musuh yang sudah sangat dekat bisa "menemukan" pemain
@@ -369,6 +420,34 @@ func _update_perception(step: float) -> void:
 		_target = best
 
 
+func _menjauh_dari(pos: Vector2) -> void:
+	# Kembali patroli ke titik patroli yang tidak searah dengan pemain dan
+	# cukup jauh dari mereka (yang terdekat dari posisi musuh sekarang).
+	_set_state(State.PATROL)
+	_path = PackedVector2Array()
+	_path_index = 0
+	if patrol_points.is_empty():
+		return
+	var arah_pemain: Vector2 = pos - global_position
+	var terbaik: int = -1
+	var jarak_terbaik: float = INF
+	var terjauh: int = 0
+	var jarak_terjauh: float = -1.0
+	for i: int in range(patrol_points.size()):
+		var pt: Vector2 = patrol_points[i]
+		var dari_pemain: float = pt.distance_to(pos)
+		if dari_pemain > jarak_terjauh:
+			jarak_terjauh = dari_pemain
+			terjauh = i
+		if dari_pemain < 260.0 or (pt - global_position).dot(arah_pemain) > 0.0:
+			continue
+		var d: float = global_position.distance_to(pt)
+		if d < jarak_terbaik:
+			jarak_terbaik = d
+			terbaik = i
+	_patrol_index = terbaik if terbaik != -1 else terjauh
+
+
 func _decay_suspicion(step: float) -> void:
 	_suspicion = maxf(0.0, _suspicion - step * 0.8)
 	if state == State.CHASE and not _lure_active:
@@ -399,6 +478,8 @@ func _check_catch() -> void:
 			continue
 		if p.iframes_left > 0.0:
 			continue
+		if _aman(p):
+			continue  # berdua di tugas 2 pemain = tidak bisa ditangkap
 		if global_position.distance_to(p.global_position) <= CATCH_RANGE:
 			_stun_timer = 2.0
 			_set_state(State.STUNNED)

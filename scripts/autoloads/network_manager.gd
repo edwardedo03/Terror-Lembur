@@ -111,6 +111,84 @@ func _on_server_disconnected() -> void:
 	host_disconnected.emit()
 
 
+# ------------------------------------------------------------- IP lokal ---
+## Kata di nama adapter yang menandakan adapter virtual (bukan Wi-Fi/LAN
+## sungguhan). IP dari adapter ini tidak ditampilkan di menu.
+const ADAPTER_VIRTUAL: Array[String] = [
+	"virtualbox", "vbox", "vmware", "vethernet", "hyper-v", "wsl",
+	"docker", "loopback", "bluetooth", "host-only",
+]
+
+
+## Daftar IPv4 PC ini yang bisa dipakai teman untuk Join, urut dari yang
+## paling mungkin benar (Wi-Fi / Ethernet 192.168.x dulu). Dipakai label
+## "IP MESIN INI" di main menu dan Pilih Level, jadi host tidak perlu
+## membuka cmd lalu ipconfig. Tiap isi: { "ip": "192.168.1.7", "adapter": "Wi-Fi" }.
+func daftar_ip_lan() -> Array[Dictionary]:
+	var hasil: Array[Dictionary] = []
+	var sudah: Dictionary = {}
+	for iface: Dictionary in IP.get_local_interfaces():
+		var nama: String = String(iface.get("friendly", iface.get("name", "")))
+		if _adapter_virtual(nama):
+			continue
+		var alamat: Variant = iface.get("addresses", [])
+		for ip: String in alamat:
+			if not _ipv4_lan(ip) or sudah.has(ip):
+				continue
+			sudah[ip] = true
+			hasil.append({"ip": ip, "adapter": nama})
+	if hasil.is_empty():
+		# Cadangan kalau daftar adapter kosong di OS tertentu.
+		for ip: String in IP.get_local_addresses():
+			if _ipv4_lan(ip) and not sudah.has(ip):
+				sudah[ip] = true
+				hasil.append({"ip": ip, "adapter": ""})
+	hasil.sort_custom(_ip_lebih_dulu)
+	return hasil
+
+
+## IP utama untuk label Dymo ("" kalau tidak ada jaringan).
+func ip_utama() -> String:
+	var daftar: Array[Dictionary] = daftar_ip_lan()
+	if daftar.is_empty():
+		return ""
+	return String(daftar[0]["ip"])
+
+
+func _adapter_virtual(nama: String) -> bool:
+	var kecil: String = nama.to_lower()
+	for kata: String in ADAPTER_VIRTUAL:
+		if kecil.contains(kata):
+			return true
+	return false
+
+
+func _ipv4_lan(ip: String) -> bool:
+	if ip.count(".") != 3:
+		return false
+	return not (ip.begins_with("127.") or ip.begins_with("169.254.") or ip == "0.0.0.0")
+
+
+func _ip_lebih_dulu(a: Dictionary, b: Dictionary) -> bool:
+	return _skor_ip(a) < _skor_ip(b)
+
+
+func _skor_ip(isi: Dictionary) -> int:
+	var ip: String = String(isi.get("ip", ""))
+	var adapter: String = String(isi.get("adapter", "")).to_lower()
+	var skor: int = 50
+	if ip.begins_with("192.168."):
+		skor = 10
+	elif ip.begins_with("10."):
+		skor = 20
+	elif ip.begins_with("172."):
+		skor = 30
+	if adapter.contains("wi-fi") or adapter.contains("wifi") or adapter.contains("wlan") \
+			or adapter.contains("wireless") or adapter.contains("ethernet"):
+		skor -= 5
+	return skor
+
+
 # Pengaman: kalau InputMap di project.godot belum kebaca (mis. project
 # dibuka dari versi editor lain), aksi tetap dibuat di runtime.
 func _ensure_input_actions() -> void:

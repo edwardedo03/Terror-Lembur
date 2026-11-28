@@ -5,18 +5,25 @@ extends CanvasLayer
 ## - HP pemain (kiri bawah): baterai, jam, fase, notifikasi laporan,
 ##   tombol senter (R). Kalau baterai 0% layar HP mati -> jam & notifikasi
 ##   ikut hilang.
-## - Sticky note (kanan atas): daftar laporan malam ini.
+## - Papan laporan (kanan atas): menu dropdown beranimasi. Kertasnya
+##   "menggulung" turun/naik. Turun sendiri beberapa detik kalau ada laporan
+##   baru; Tab untuk buka / tutup kapan saja. Tiap baris: jam, nama alat,
+##   ruangan & batas waktu.
 ## - ID card (kiri atas): status P1/P2 + garis baterai, cap DIKURUNG.
+##   Kalau dua pemain sedang berdua (aman dari Satpam), kartunya dijepit
+##   klip kertas.
 ## - Label Dymo (bawah tengah): tombol yang bisa ditekan sekarang.
 ## - Baris log merah (atas tengah): kejadian besar, diketik huruf demi huruf.
+## - Bar energi lari (di atas kepala pemain sendiri): kecil & tipis, hanya
+##   muncul saat lari / mengisi lagi.
 ## - Kotak debug (kanan bawah): hanya kalau debug di node Level2 dinyalakan.
 ## Dibuat oleh level_2.gd saat game mulai; datanya dibaca dari level.
 
-const F_INTER_LIGHT: Font = preload("res://assets/fonts/Inter-Light.otf")
-const F_INTER: Font = preload("res://assets/fonts/Inter-Medium.otf")
-const F_INTER_TEBAL: Font = preload("res://assets/fonts/Inter-SemiBold.otf")
-const F_MONO: Font = preload("res://assets/fonts/lmmono10-regular.otf")
-const F_MONO_TEBAL: Font = preload("res://assets/fonts/lmmonolt10-bold.otf")
+const F_INTER_LIGHT: Font = preload("res://assets/level2/fonts/Inter-Light.otf")
+const F_INTER: Font = preload("res://assets/level2/fonts/Inter-Medium.otf")
+const F_INTER_TEBAL: Font = preload("res://assets/level2/fonts/Inter-SemiBold.otf")
+const F_MONO: Font = preload("res://assets/level2/fonts/lmmono10-regular.otf")
+const F_MONO_TEBAL: Font = preload("res://assets/level2/fonts/lmmonolt10-bold.otf")
 
 const KUNING := Color(1.0, 0.745, 0.333)
 const MERAH := Color(0.92, 0.31, 0.27)
@@ -42,11 +49,19 @@ var log_antrian: Array = []  # [[teks, warna]]
 func _ready() -> void:
 	layer = 11
 	_tambah(_KartuPemain.new(), "KartuPemain")
-	_tambah(_StickyNote.new(), "StickyNote")
+	_tambah(_PapanLaporan.new(), "PapanLaporan")
 	_tambah(_HpPemain.new(), "HpPemain")
 	_tambah(_LabelDymo.new(), "LabelDymo")
 	_tambah(_LogLayar.new(), "LogLayar")
 	_tambah(_KotakDebug.new(), "KotakDebug")
+	_tambah(_PenandaBangkit.new(), "PenandaBangkit")
+	# Busur kedua (biru muda) menunjuk komputer security sampai komputer
+	# dinyalakan pertama kali (level_2.gd -> get_tujuan_komputer()).
+	var penanda_komputer := _PenandaBangkit.new()
+	penanda_komputer.warna = _PenandaBangkit.BIRU_KOMPUTER
+	penanda_komputer.metode = "get_tujuan_komputer"
+	_tambah(penanda_komputer, "PenandaKomputer")
+	_tambah(_BarEnergi.new(), "BarEnergi")
 
 
 func _tambah(w: Control, nama: String) -> void:
@@ -116,6 +131,24 @@ class _Widget extends Control:
 
 	func _atur_posisi(_vp: Vector2) -> void:
 		pass
+
+	# Pemain di PC ini (dipakai bar energi & busur Item Bangkit).
+	func _pemain() -> Node:
+		if hud == null or hud.level == null:
+			return null
+		return hud.level.get_local_player()
+
+	# true kalau denah / layar komputer sedang terbuka (penanda di atas
+	# kepala tidak perlu tampil).
+	func _ada_layar_penuh() -> bool:
+		var lv: Node = hud.level if hud != null else null
+		if lv == null:
+			return false
+		var dn: Node = lv.get("denah")
+		if dn != null and dn.has_method("is_terbuka") and dn.is_terbuka():
+			return true
+		var lk: Node = lv.get("layar_komputer")
+		return lk != null and lk.has_method("is_terbuka") and lk.is_terbuka()
 
 	func kotak(r: Rect2, warna: Color, radius: float, tebal_garis: float = 0.0, warna_garis: Color = Color(0, 0, 0, 0)) -> void:
 		var sb := StyleBoxFlat.new()
@@ -283,65 +316,160 @@ class _HpPemain extends _Widget:
 		teks(hud.f_tebal, Vector2(c.x + 21, c.y + 4), "R", 10, Color(0.67, 0.69, 0.77))
 
 
-# ========================================================== sticky note
-class _StickyNote extends _Widget:
+# ================================================= papan laporan (dropdown)
+class _PapanLaporan extends _Widget:
+	const LEBAR: float = 236.0
+	const TINGGI_KEPALA: float = 34.0
+	const TINGGI_BARIS: float = 34.0
+	const KERTAS := Color(0.957, 0.827, 0.369)
+	const KERTAS_GELAP := Color(0.84, 0.7, 0.27)
+	const COKLAT := Color(0.27, 0.2, 0.08)
+	const MERAH_PENA := Color(0.78, 0.16, 0.14)
+	const BIRU_PENA := Color(0.14, 0.27, 0.59)
+	const DETIK_TURUN_SENDIRI: float = 5.0
+
+	var _t: float = 0.0  # 0 = tergulung, 1 = terbuka penuh (bisa sedikit lebih karena pegas)
+	var _kec: float = 0.0
+	var _dipin: bool = false  # dibuka pakai Tab
+	var _turun_sendiri: float = 0.0
+	var _aktif_lama: Dictionary = {}
+	var _waktu: float = 0.0
+
 	func _ready() -> void:
-		size = Vector2(176, 214)
-		pivot_offset = size * 0.5
-		rotation = deg_to_rad(2.5)
+		size = Vector2(LEBAR, 330)
 
 	func _atur_posisi(vp: Vector2) -> void:
-		position = Vector2(vp.x - size.x - 18.0, 22.0)
+		position = Vector2(vp.x - LEBAR - 16.0, 10.0)
+
+	func _unhandled_input(event: InputEvent) -> void:
+		var k := event as InputEventKey
+		if k != null and k.pressed and not k.echo and k.keycode == KEY_TAB:
+			_dipin = not _dipin
+			if not _dipin:
+				_turun_sendiri = 0.0
+			get_viewport().set_input_as_handled()
+
+	func is_terbuka() -> bool:
+		return _dipin or _turun_sendiri > 0.0
+
+	func _process(delta: float) -> void:
+		_atur_posisi(get_viewport().get_visible_rect().size)
+		_waktu += delta
+		# laporan baru -> kertas turun sendiri beberapa detik
+		if hud != null and hud.level != null:
+			for l: Dictionary in hud.level.get_info_laporan_semua():
+				var kunci: String = str(l["nama"])
+				var aktif: bool = str(l["status"]) == "aktif"
+				if aktif and not bool(_aktif_lama.get(kunci, false)):
+					_turun_sendiri = DETIK_TURUN_SENDIRI
+				_aktif_lama[kunci] = aktif
+		_turun_sendiri = maxf(0.0, _turun_sendiri - delta)
+		# pegas teredam: sedikit memantul saat terbuka / tertutup
+		var target: float = 1.0 if is_terbuka() else 0.0
+		_kec += ((target - _t) * 120.0 - _kec * 14.0) * delta
+		_t = clampf(_t + _kec * delta, -0.02, 1.08)
+		queue_redraw()
 
 	func _draw() -> void:
 		var lv: Node = hud.level
 		if lv == null:
 			return
-		var w: float = size.x
-		var h: float = size.y
-		var kertas := PackedVector2Array([Vector2(0, 4), Vector2(w, 0), Vector2(w, h - 6), Vector2(w - 14, h), Vector2(0, h - 2)])
-		var bayang := PackedVector2Array()
-		for p: Vector2 in kertas:
-			bayang.append(p + Vector2(4, 6))
-		draw_colored_polygon(bayang, Color(0, 0, 0, 0.4))
-		draw_colored_polygon(kertas, Color(0.957, 0.827, 0.369))
-		draw_colored_polygon(PackedVector2Array([Vector2(w, h - 6), Vector2(w - 14, h), Vector2(w - 12, h - 10)]), Color(0.84, 0.7, 0.27))
-		# selotip
-		var pusat := Vector2(w * 0.5, -2)
-		var sel := PackedVector2Array()
-		for p: Vector2 in [Vector2(-29, -9), Vector2(29, -9), Vector2(29, 9), Vector2(-29, 9)]:
-			sel.append(pusat + p.rotated(deg_to_rad(-9.0)))
-		draw_colored_polygon(sel, Color(0.94, 0.91, 0.82, 0.6))
-		var coklat := Color(0.27, 0.2, 0.08)
-		teks(hud.f_mono_tebal, Vector2(14, 26), "LAPORAN MALAM INI", 11, coklat)
-		goyang([Vector2(14, 31), Vector2(80, 31.5), Vector2(150, 30)], coklat, 1.2, 11)
-		var y: float = 50.0
-		var i: int = 0
-		for l: Dictionary in lv.get_info_laporan_semua():
-			var st: String = str(l["status"])
-			draw_line(Vector2(10, y + 9), Vector2(w - 10, y + 9), Color(0.84, 0.72, 0.31), 1.0)
-			teks(hud.f_mono, Vector2(14, y + 4), str(l["jam"]), 10, Color(0.35, 0.27, 0.12))
-			if st == "belum":
-				teks(hud.f_mono, Vector2(60, y + 4), ". . . . . .", 10, Color(0.67, 0.55, 0.24))
-			else:
-				var nama: String = str(l["nama"]) + ("*" if bool(l["wajib"]) else "")
-				teks(hud.f_mono_tebal, Vector2(60, y + 4), nama, 10, Color(0.16, 0.125, 0.06))
-				var bx: float = w - 30.0
-				goyang([Vector2(bx, y - 6), Vector2(bx + 11, y - 6.5), Vector2(bx + 11.5, y + 5), Vector2(bx, y + 5.5), Vector2(bx, y - 6)], Color(0.24, 0.18, 0.08), 1.3, 100 + i)
-				if st == "aktif":
-					var lingkar: Array = []
-					for k: int in range(31):
-						var a: float = 0.3 + (TAU + 0.3) * k / 30.0
-						lingkar.append(Vector2(30 + 19 * cos(a), y + 0.5 + 8 * sin(a)))
-					goyang(lingkar, Color(0.78, 0.16, 0.14), 1.4, 200 + i)
-				elif st == "beres":
-					goyang([Vector2(bx + 1, y - 1), Vector2(bx + 5, y + 4), Vector2(bx + 15, y - 10)], Color(0.14, 0.27, 0.59), 2.2, 300 + i)
-				elif st == "telat":
-					goyang([Vector2(56, y + 1), Vector2(bx - 6, y - 1)], Color(0.78, 0.16, 0.14), 2.0, 400 + i)
-					teks(hud.f_mono_tebal, Vector2(bx + 15, y + 4), "!", 11, Color(0.78, 0.16, 0.14))
-			y += 22.0
-			i += 1
-		teks(hud.f_mono, Vector2(14, h - 10), "* wajib sebelum 05.00", 8, Color(0.47, 0.37, 0.16))
+		var daftar: Array = lv.get_info_laporan_semua()
+		var jumlah_aktif: int = 0
+		for l: Dictionary in daftar:
+			if str(l["status"]) == "aktif":
+				jumlah_aktif += 1
+		var w: float = LEBAR
+		var atas: float = TINGGI_KEPALA - 6.0
+		var tinggi_penuh: float = 16.0 + daftar.size() * TINGGI_BARIS + 20.0
+		var tinggi: float = maxf(0.0, tinggi_penuh * _t)
+		# --- kertas yang menggulung turun
+		if tinggi > 2.0:
+			var kiri: float = 10.0
+			var kanan: float = w - 10.0
+			var bawah: float = atas + tinggi
+			var kertas := PackedVector2Array([Vector2(kiri, atas), Vector2(kanan, atas), Vector2(kanan, bawah - 3), Vector2(kiri + 1, bawah)])
+			var bayang := PackedVector2Array()
+			for p: Vector2 in kertas:
+				bayang.append(p + Vector2(4, 5))
+			draw_colored_polygon(bayang, Color(0, 0, 0, 0.35))
+			draw_colored_polygon(kertas, KERTAS)
+			var y: float = atas + 16.0
+			var i: int = 0
+			for l: Dictionary in daftar:
+				if y + TINGGI_BARIS - 8.0 > bawah - 6.0:
+					break  # baris ini belum "terbuka" oleh gulungan
+				_baris(l, y, i)
+				y += TINGGI_BARIS
+				i += 1
+			if atas + tinggi_penuh - 8.0 <= bawah:
+				teks(hud.f_mono, Vector2(18, bawah - 8), "* wajib beres sebelum 05.00", 8, Color(0.47, 0.37, 0.16))
+			# gulungan kertas di ujung bawah
+			kotak(Rect2(kiri - 3, bawah - 4, kanan - kiri + 6, 9), KERTAS_GELAP, 4)
+			draw_line(Vector2(kiri + 2, bawah - 2), Vector2(kanan - 2, bawah - 2), Color(1, 0.95, 0.75, 0.6), 1.0)
+		else:
+			# tergulung rapat di bawah papan
+			kotak(Rect2(7, atas - 2, w - 14, 9), KERTAS_GELAP, 4)
+			draw_line(Vector2(12, atas), Vector2(w - 12, atas), Color(1, 0.95, 0.75, 0.6), 1.0)
+		# --- papan (clipboard) + penjepit
+		kotak(Rect2(2, 4, w, TINGGI_KEPALA), Color(0, 0, 0, 0.35), 6)
+		kotak(Rect2(0, 0, w, TINGGI_KEPALA), Color(0.42, 0.3, 0.17), 6, 1, Color(0.3, 0.2, 0.1))
+		kotak(Rect2(w * 0.5 - 26, -5, 52, 13), Color(0.66, 0.67, 0.7), 4, 1, Color(0.45, 0.46, 0.5))
+		kotak(Rect2(w * 0.5 - 9, -2, 18, 5), Color(0.42, 0.3, 0.17), 2)
+		teks(hud.f_mono_tebal, Vector2(12, 24), "LAPORAN", 12, Color(0.98, 0.93, 0.8))
+		if jumlah_aktif > 0:
+			var label: String = "%d aktif" % jumlah_aktif
+			var lb: float = lebar_teks(hud.f_mono_tebal, label, 10) + 12.0
+			var denyut: float = 0.85 + 0.15 * sin(_waktu * 4.0)
+			kotak(Rect2(78, 11, lb, 16), Color(MERAH_PENA.r, MERAH_PENA.g, MERAH_PENA.b, denyut), 8)
+			teks(hud.f_mono_tebal, Vector2(84, 23), label, 10, Color(1, 0.95, 0.9))
+		teks_kanan(hud.f_mono, Vector2(w - 26, 23), "Tab", 10, Color(0.98, 0.93, 0.8, 0.55))
+		# panah ▾ berputar mengikuti buka/tutup
+		var pusat := Vector2(w - 14, 17)
+		var sudut: float = PI * clampf(_t, 0.0, 1.0)
+		var panah := PackedVector2Array()
+		for p: Vector2 in [Vector2(-5, -2.5), Vector2(5, -2.5), Vector2(0, 3.5)]:
+			panah.append(pusat + p.rotated(sudut))
+		draw_colored_polygon(panah, Color(0.98, 0.93, 0.8))
+
+	func _baris(l: Dictionary, y: float, i: int) -> void:
+		var w: float = LEBAR
+		var st: String = str(l["status"])
+		draw_line(Vector2(16, y + 22), Vector2(w - 16, y + 22), Color(0.84, 0.72, 0.31), 1.0)
+		teks(hud.f_mono, Vector2(18, y + 5), str(l["jam"]), 10, Color(0.35, 0.27, 0.12))
+		var x_nama: float = 62.0
+		var lebar_maks: float = w - x_nama - 40.0
+		if st == "belum":
+			teks(hud.f_mono, Vector2(x_nama, y + 5), ". . . . . .", 10, Color(0.67, 0.55, 0.24))
+			teks(hud.f_mono, Vector2(x_nama, y + 17), "belum ada laporan", 8, Color(0.6, 0.5, 0.25))
+			return
+		var nama: String = str(l["nama"]) + ("*" if bool(l["wajib"]) else "")
+		teks(hud.f_mono_tebal, Vector2(x_nama, y + 5), pendekkan(hud.f_mono_tebal, nama, 11, lebar_maks), 11, Color(0.16, 0.125, 0.06))
+		# baris kedua: ruangan (kiri) + batas waktu / keadaan (kanan)
+		var kanan: String = "s/d " + str(l["batas"])
+		if st == "beres":
+			kanan = "beres"
+		elif st == "telat":
+			kanan = "TERLAMBAT"
+		var warna_ket: Color = MERAH_PENA if st == "telat" else Color(0.4, 0.31, 0.13)
+		var lebar_kanan: float = lebar_teks(hud.f_mono_tebal, kanan, 9)
+		teks_kanan(hud.f_mono_tebal, Vector2(w - 16.0, y + 17), kanan, 9, warna_ket)
+		var ruang: String = pendekkan(hud.f_mono, str(l["area"]), 9, w - 16.0 - lebar_kanan - 8.0 - x_nama)
+		teks(hud.f_mono, Vector2(x_nama, y + 17), ruang, 9, Color(0.4, 0.31, 0.13))
+		# kotak centang tulisan tangan
+		var bx: float = w - 32.0
+		goyang([Vector2(bx, y - 4), Vector2(bx + 11, y - 4.5), Vector2(bx + 11.5, y + 7), Vector2(bx, y + 7.5), Vector2(bx, y - 4)], Color(0.24, 0.18, 0.08), 1.3, 100 + i)
+		if st == "aktif":
+			var lingkar: Array = []
+			for k: int in range(31):
+				var a: float = 0.3 + (TAU + 0.3) * k / 30.0
+				lingkar.append(Vector2(32 + 19 * cos(a), y + 1.5 + 8 * sin(a)))
+			goyang(lingkar, MERAH_PENA, 1.4, 200 + i)
+		elif st == "beres":
+			goyang([Vector2(bx + 1, y + 1), Vector2(bx + 5, y + 6), Vector2(bx + 15, y - 8)], BIRU_PENA, 2.2, 300 + i)
+		elif st == "telat":
+			goyang([Vector2(x_nama - 4, y + 2), Vector2(bx - 6, y + 1)], MERAH_PENA, 2.0, 400 + i)
+			teks(hud.f_mono_tebal, Vector2(bx + 15, y + 6), "!", 11, MERAH_PENA)
 
 
 # =========================================================== ID card
@@ -378,6 +506,21 @@ class _KartuPemain extends _Widget:
 				teks_tengah(hud.f_mono_tebal, Vector2.ZERO, kata, 9, warna_cap)
 				draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 			i += 1
+		var info: Array = lv.get_info_pemain()
+		if info.size() >= 2 and bool(info[0].get("aman", false)) and bool(info[1].get("aman", false)):
+			_klip(Vector2(71, 44))
+
+	func _klip(c: Vector2) -> void:
+		# Klip kertas yang menjepit dua ID card = sedang berdua, aman dari Satpam.
+		var logam := Color(0.78, 0.8, 0.84)
+		var tebal: float = 1.8
+		draw_arc(c + Vector2(-13, 0), 5.0, PI * 0.5, PI * 1.5, 12, logam, tebal, true)
+		draw_arc(c + Vector2(14, 0), 5.0, -PI * 0.5, PI * 0.5, 12, logam, tebal, true)
+		draw_line(c + Vector2(-13, -5), c + Vector2(14, -5), logam, tebal, true)
+		draw_line(c + Vector2(-13, 5), c + Vector2(10, 5), logam, tebal, true)
+		draw_arc(c + Vector2(10, 1.5), 3.5, PI * 0.5, PI * 1.5, 10, logam, tebal, true)
+		draw_line(c + Vector2(10, -2), c + Vector2(-8, -2), logam, tebal, true)
+		teks_tengah(hud.f_mono_tebal, c + Vector2(0, 15), "BERDUA", 8, Color(0.85, 0.9, 1.0, 0.85))
 
 	func _kartu(p: Dictionary, i: int) -> void:
 		var w: float = 54.0
@@ -492,3 +635,138 @@ class _KotakDebug extends _Widget:
 		for b: String in baris:
 			teks(hud.f_mono, Vector2(x + 4, yy), b, 11, Color(1.0, 0.9, 0.55))
 			yy += 14.0
+
+
+# ======================================================= bar energi lari
+# Digambar di layar (bukan di dunia game) tepat di atas kepala pemain sendiri,
+# jadi ukurannya tetap kecil walaupun kamera di-zoom dan tidak ikut gelap.
+class _BarEnergi extends _Widget:
+	# Bar energi lari kecil di atas kepala pemain lokal.
+	# Warna dibuat kontras (kuning-amber + garis tepi gelap) supaya tetap
+	# kelihatan di lantai yang terang kena lingkaran pandangan maupun di gelap.
+	const LEBAR: float = 34.0
+	const TINGGI: float = 4.0
+	const DI_ATAS_KEPALA: float = -23.0  # titik di dunia game (px) relatif ke pemain
+	const AMBER: Color = Color(1.0, 0.78, 0.18)  # sedang lari
+	const AMBER_ISI: Color = Color(1.0, 0.86, 0.45)  # sedang mengisi (lebih pucat)
+	const MERAH_HABIS: Color = Color(1.0, 0.27, 0.2)  # habis
+	const TEPI: Color = Color(0.05, 0.04, 0.03)
+	const BATAS_LARI: float = 0.3  # sama dengan ENERGI_MIN_LARI di player_level2.gd
+	var _alpha: float = 0.0
+	var _kedip: float = 0.0
+
+	func _atur_posisi(vp: Vector2) -> void:
+		size = vp
+		position = Vector2.ZERO
+
+	func _process(delta: float) -> void:
+		_atur_posisi(get_viewport().get_visible_rect().size)
+		queue_redraw()
+		_kedip += delta
+		var p: Node = _pemain()
+		var perlu: bool = p != null and not p.is_hidden and not p.is_downed and not p.minigame_open \
+			and not _ada_layar_penuh() and (p.is_sprinting or float(p.energi) < 0.999)
+		# muncul cepat, hilang pelan setelah penuh
+		_alpha = move_toward(_alpha, 1.0 if perlu else 0.0, delta * (6.0 if perlu else 1.5))
+
+	func _draw() -> void:
+		var p: Node2D = _pemain() as Node2D
+		if p == null or _alpha <= 0.01:
+			return
+		var titik: Vector2 = p.get_global_transform_with_canvas() * Vector2(0, DI_ATAS_KEPALA)
+		var r := Rect2(titik.x - LEBAR * 0.5, titik.y - TINGGI, LEBAR, TINGGI)
+		# tepi gelap 1 px + dasar gelap supaya bar terbaca di latar apa pun
+		kotak(r.grow(1.0), Color(TEPI, 0.8 * _alpha), 3)
+		# jalur kosong: abu hangat; saat habis jadi merah tua supaya langsung terbaca
+		var jalur: Color = Color(0.4, 0.09, 0.07) if p.energi_habis else Color(0.27, 0.24, 0.2)
+		kotak(r, Color(jalur, 0.9 * _alpha), 2)
+		var warna: Color
+		if p.energi_habis:
+			# habis: merah berdenyut sampai terisi 30% (baru boleh lari lagi)
+			warna = Color(MERAH_HABIS, 0.75 + 0.25 * sin(_kedip * 9.0))
+		elif p.is_sprinting:
+			warna = Color(AMBER, 1.0)
+		else:
+			warna = Color(AMBER_ISI, 0.85)  # mengisi: sedikit lebih pucat, tetap kelihatan
+		var isi: float = LEBAR * clampf(float(p.energi), 0.0, 1.0)
+		if isi >= 1.0:
+			kotak(Rect2(r.position, Vector2(isi, TINGGI)), Color(warna.r, warna.g, warna.b, warna.a * _alpha), 2)
+		if p.energi_habis:
+			# garis tipis di 30%: batas boleh lari lagi
+			var x: float = r.position.x + LEBAR * BATAS_LARI
+			draw_line(Vector2(x, r.position.y - 1.0), Vector2(x, r.end.y + 1.0), Color(1, 1, 1, 0.8 * _alpha), 1.0)
+
+
+# ======================================================= PENANDA ITEM BANGKIT
+class _PenandaBangkit extends _Widget:
+	# Garis busur tipis hijau di tepi lingkaran pandang (seperti radar) yang
+	# menunjuk ke Item Bangkit; setelah item diambil, menunjuk ke kurungan
+	# teman. Mekanismenya sama dengan pertanda Satpam (arah + makin dekat
+	# makin jelas, tembus tembok), tapi digambar sebagai garis di atas
+	# kegelapan, jadi lantai tidak ikut berwarna. Hanya untuk pemain yang
+	# bebas; tujuannya diambil dari level.get_tujuan_bangkit().
+	# Kelas yang sama dipakai lagi untuk busur biru muda penunjuk komputer
+	# security (warna & metode diganti, lihat _ready HudMalam).
+	const HIJAU_BUSUR: Color = Color(0.27, 1.0, 0.47)
+	const BIRU_KOMPUTER: Color = Color(0.45, 0.78, 1.0)
+	const RADIUS_DUNIA: float = 50.0  # px dunia dari tengah pemain (±1,6 tile = tepi lingkaran pandang)
+	const JARAK_PENUH: float = 48.0  # <= 1,5 tile: busur paling panjang & terang
+	const JARAK_JAUH: float = 512.0  # >= 16 tile: busur paling pendek & tipis
+	const KEKUATAN_MIN: float = 0.3  # walau jauh tetap kelihatan sedikit
+	const TEBAL: float = 5.0  # px layar
+	var warna: Color = HIJAU_BUSUR
+	var metode: String = "get_tujuan_bangkit"  # fungsi level yang memberi {"ada", "pos"}
+	var _waktu: float = 0.0
+	var _alpha: float = 0.0
+	var _kekuatan: float = 0.0
+	var _sudut: float = 0.0
+
+	func _atur_posisi(vp: Vector2) -> void:
+		size = vp
+		position = Vector2.ZERO
+
+	func _process(delta: float) -> void:
+		_atur_posisi(get_viewport().get_visible_rect().size)
+		queue_redraw()
+		_waktu += delta
+		var p: Node2D = _pemain() as Node2D
+		var tujuan: Dictionary = {}
+		if hud != null and hud.level != null and hud.level.has_method(metode):
+			var hasil: Variant = hud.level.call(metode)
+			if hasil is Dictionary:
+				tujuan = hasil
+		var tampil: bool = p != null and bool(tujuan.get("ada", false)) and not p.is_hidden \
+			and not p.minigame_open and not _ada_layar_penuh()
+		if tampil:
+			var arah: Vector2 = (tujuan["pos"] as Vector2) - p.global_position
+			var t: float = clampf(1.0 - (arah.length() - JARAK_PENUH) / (JARAK_JAUH - JARAK_PENUH), 0.0, 1.0)
+			_kekuatan = KEKUATAN_MIN + (1.0 - KEKUATAN_MIN) * pow(t, 1.2)
+			if arah.length() > 1.0:
+				if _alpha <= 0.01:
+					_sudut = arah.angle()  # baru muncul: langsung ke arah yang benar
+				else:
+					_sudut = lerp_angle(_sudut, arah.angle(), minf(1.0, delta * 10.0))
+		_alpha = move_toward(_alpha, 1.0 if tampil else 0.0, delta * 3.0)
+
+	func get_kekuatan() -> float:
+		# Untuk smoke test & debug (0 = tidak tampil).
+		return _kekuatan * _alpha
+
+	func _draw() -> void:
+		var p: Node2D = _pemain() as Node2D
+		if p == null or _alpha <= 0.01:
+			return
+		var xf: Transform2D = p.get_global_transform_with_canvas()
+		var pusat: Vector2 = xf.origin
+		var r: float = RADIUS_DUNIA * xf.get_scale().x
+		# makin dekat makin panjang: setengah busur 10° (jauh) s/d 32° (dekat)
+		var setengah: float = deg_to_rad(10.0 + 22.0 * _kekuatan)
+		var napas: float = 0.82 + 0.18 * sin(_waktu * 2.5)  # denyut pelan (merah Satpam berdenyut cepat)
+		var a: float = (0.3 + 0.7 * _kekuatan) * napas * _alpha
+		var mulai: float = _sudut - setengah
+		var akhir: float = _sudut + setengah
+		# garis tepi gelap dulu supaya terbaca di lantai terang maupun gelap
+		draw_arc(pusat, r, mulai, akhir, 32, Color(0, 0, 0, 0.6 * a), TEBAL * 2.0, true)
+		draw_arc(pusat, r, mulai, akhir, 32, Color(warna, a), TEBAL, true)
+		for ujung: float in [mulai, akhir]:
+			draw_circle(pusat + Vector2.from_angle(ujung) * r, TEBAL * 0.5, Color(warna, a))
